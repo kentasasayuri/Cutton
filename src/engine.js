@@ -4,7 +4,7 @@ const base = remote ? 'http://127.0.0.1:4318' : '';
 let token='', pairing;
 export async function connectEngine(){
   if(!remote||token)return;
-  if(!pairing)pairing=fetch(base+'/api/pair',{method:'POST'}).then(async response=>{
+  if(!pairing)pairing=fetch(base+'/api/pair',{method:'POST',signal:AbortSignal.timeout(8000)}).then(async response=>{
     const data=await response.json();if(!response.ok||!data.token)throw new Error(data.error||'接続できません');token=data.token;
   }).catch(()=>{throw new Error('編集エンジンに接続できません。PCで「Cuttonを起動」を開き、ブラウザのローカルネットワーク接続を許可してください。');}).finally(()=>{pairing=null;});
   return pairing;
@@ -21,7 +21,8 @@ export function hydrateEngineUrls(value){
 export async function engineFetch(url,options={}){
   await connectEngine();
   const headers=new Headers(options.headers);if(remote)headers.set('Authorization','Bearer '+token);
-  const response=await fetch(base+url,{...options,headers});
-  if(remote&&response.status===401){token='';await connectEngine();headers.set('Authorization','Bearer '+token);return fetch(base+url,{...options,headers});}
+  const signal=options.signal||AbortSignal.timeout(url==='/api/command'||url.includes('/upload')?1800000:15000);
+  const response=await fetch(base+url,{...options,headers,signal});
+  if(remote&&response.status===401){token='';await connectEngine();headers.set('Authorization','Bearer '+token);return fetch(base+url,{...options,headers,signal});}
   return response;
 }
