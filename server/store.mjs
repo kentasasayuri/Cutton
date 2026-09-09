@@ -24,6 +24,7 @@ export const COMMANDS = [
   ['graphics.add', 'タイトル・テロップ・図形を追加', ['type?', 'text?', 'start?', 'duration?', 'x?', 'y?', 'fontSize?', 'color?', 'animation?', 'width?', 'height?', 'keyframes?']], ['graphics.update', 'タイトル・テロップ・図形を編集', ['id', 'type?', 'text?', 'start?', 'duration?', 'x?', 'y?', 'fontSize?', 'color?', 'animation?', 'width?', 'height?', 'keyframes?']], ['graphics.remove', 'タイトル・テロップ・図形を削除', ['id']],
   ['settings.update', 'ComfyUI / Google Vids / Codex の接続設定', ['comfyUrl?', 'vidsUrl?', 'codexModel?']], ['integrations.check', 'FFmpeg・Codex・ComfyUIの接続を確認', []],
   ['generation.submit', 'ComfyUI APIワークフローで素材を生成', ['kind', 'prompt', 'sceneId?', 'workflow', 'seed?']], ['generation.refresh', '生成状況を取得し完成素材を取り込む', ['id']],
+  ['image.generate','Codexのサブスク枠で画像を生成して素材へ取り込む',['prompt','aspect?','sceneId?']],
   ['narration.prepare', 'Google Vidsへ渡す台本とプロンプトを作成', ['prompt', 'sceneId?', 'mode?', 'language?', 'voice?']], ['narration.import', 'Vidsの音声またはMP4から音声を取り込む', ['path', 'sceneId?', 'jobId?']],
   ['export.create', 'プロジェクト・編集表・MP4を書き出す', ['format']], ['decisions.export', '採否の判断例をSKILL.mdへ書き出す', []],
 ].map(([name, description, args]) => ({ name, description, args }));
@@ -197,14 +198,15 @@ async function openProject(input, current, dataDir) {
   const jobIdMap = new Map();
   restored.jobs = (imported.jobs || []).map((sourceJob) => {
     const sourceId = textValue(sourceJob.id, 'ジョブID', { max: 100 });
-    const type = choice(sourceJob.type, ['generation', 'narration'], 'ジョブの種類');
+    const type = choice(sourceJob.type, ['generation', 'narration', 'image'], 'ジョブの種類');
     const sourceStatus = choice(sourceJob.status, ['queued', 'running', 'completed', 'failed', 'awaiting_import'], 'ジョブ状態');
     const wasActive = ['queued', 'running'].includes(sourceStatus);
     const id = uid('job'); jobIdMap.set(sourceId, id);
     const job = { id, type, prompt: textValue(sourceJob.prompt, 'ジョブのプロンプト', { max: 30000, empty: true }), status: wasActive ? 'failed' : sourceStatus, sceneId: sceneIdValue(restored, sourceJob.sceneId), createdAt: typeof sourceJob.createdAt === 'string' && !Number.isNaN(Date.parse(sourceJob.createdAt)) ? sourceJob.createdAt : now(), restoredAt: now(), originalId: sourceId, originalStatus: sourceStatus };
     if (wasActive) job.error = '保存時は実行待ち／実行中でした。プロジェクトの復元では生成を再開しません。ComfyUIで元の生成状況を確認してから新しいジョブを送信してください。';
     else if (sourceJob.error !== undefined) job.error = textValue(sourceJob.error, 'ジョブエラー', { max: 10000, empty: true });
-    if (type === 'generation') {
+    if(type==='image'){job.kind='image';job.provider='codex-app-server';job.result={assetId:idMap.get(sourceJob.result?.assetId)||null,model:'codex-built-in'};}
+    else if (type === 'generation') {
       job.kind = choice(sourceJob.kind, ['video', 'audio', 'image'], '生成メディア種類');
       if (sourceJob.promptId !== undefined) job.promptId = textValue(sourceJob.promptId, 'ComfyUI prompt ID', { max: 200 });
       if (sourceJob.seed !== undefined) { job.seed = numberValue(sourceJob.seed, 'seed', { max: Number.MAX_SAFE_INTEGER }); if (!Number.isInteger(job.seed)) throw new AppError('seed は整数で指定してください。'); }
@@ -222,9 +224,9 @@ async function openProject(input, current, dataDir) {
   for (const sourceAsset of imported.assets) {
     if (!sourceAsset.provenance) continue;
     const sourceProvenance = object(sourceAsset.provenance, '素材の生成履歴');
-    const type = choice(sourceProvenance.type, ['comfyui', 'google-vids-import'], '素材の生成元');
+    const type = choice(sourceProvenance.type, ['comfyui', 'google-vids-import', 'codex-image'], '素材の生成元');
     const provenance = { type, restored: true };
-    for (const [key, max] of [['mode', 100], ['sourceName', 200], ['promptId', 200]]) if (sourceProvenance[key] !== undefined) provenance[key] = textValue(sourceProvenance[key], key, { max });
+    for (const [key, max] of [['mode', 100], ['sourceName', 200], ['promptId', 200], ['prompt', 20000], ['revisedPrompt', 30000], ['model', 200], ['billing', 100]]) if (sourceProvenance[key] !== undefined) provenance[key] = textValue(sourceProvenance[key], key, { max });
     if (sourceProvenance.sourceAudioHash !== undefined) { if (!/^[0-9a-f]{64}$/i.test(sourceProvenance.sourceAudioHash)) throw new AppError('音声の履歴ハッシュが不正です。'); provenance.sourceAudioHash = sourceProvenance.sourceAudioHash; }
     if (sourceProvenance.streamIdentical !== undefined) provenance.streamIdentical = booleanValue(sourceProvenance.streamIdentical, 'streamIdentical');
     if (sourceProvenance.requestedKind !== undefined) provenance.requestedKind = choice(sourceProvenance.requestedKind, ['video', 'audio', 'image'], 'requestedKind');
@@ -237,7 +239,7 @@ async function openProject(input, current, dataDir) {
   return { projectId: restored.id, importedAssets: restored.assets.length, importedClips: restored.clips.length, restoredJobs: restored.jobs.length, note: '設定と接続先は現在の環境を保持し、素材・生成履歴・採否を復元しました。保存時の実行中ジョブは再開しません。' };
 }
 
-export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || process.env.YACHICUT_DATA_DIR || path.join(ROOT, 'data') } = {}) {
+export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || process.env.YACHICUT_DATA_DIR || path.join(ROOT, 'data'), imageGenerator } = {}) {
   dataDir = path.resolve(dataDir);
   for (const folder of ['', 'assets', 'exports', 'projects', 'tmp', 'thumbnails', 'waveforms']) await mkdir(path.join(dataDir, folder), { recursive: true });
   const statePath = path.join(dataDir, 'state.json');
@@ -256,6 +258,11 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
   }
   if (migrated) await atomicJson(statePath, state);
   const library=projectLibrary(dataDir);await library.initialize(state);
+  for(const entry of await library.list()){
+    const saved=entry.id===state.id?state:await library.load(entry.id);let interrupted=false;
+    for(const job of saved.jobs)if(job.type==='image'&&['queued','running'].includes(job.status)){job.status='failed';job.error='編集エンジンの終了で画像生成が中断されました。必要なら再生成してください。';interrupted=true;}
+    if(interrupted){await library.save(saved);if(saved.id===state.id)await atomicJson(statePath,saved);}
+  }
   let queue = Promise.resolve();
   const undo=[], redo=[];
   const historySizes=new WeakMap();
@@ -538,12 +545,46 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
   }, command);
 
   let exportQueue=Promise.resolve();
+  let imageQueue=Promise.resolve(),imageCount=0;
+  // Completion belongs to the submitting project even if the user switches projects.
+  const updateImageProject=(id,operation)=>{
+    const work=queue.then(async()=>{
+      const draft=id===state.id?snapshot():await library.load(id);
+      await operation(draft);draft.updatedAt=now();await library.save(draft);
+      if(id===state.id){await atomicJson(statePath,draft);state=draft;for(const listener of listeners){try{listener(snapshot());}catch{}}}
+    });queue=work.catch(()=>{});return work;
+  };
+  const startImage=async args=>{
+    object(args);if(imageCount>=4)throw new AppError('画像生成は4件まで待機できます。完了を待ってください。');
+    imageCount++;
+    let response;
+    try{response=await transact(draft=>{
+      const prompt=textValue(args.prompt,'画像プロンプト',{max:20000});
+      const aspect=choice(args.aspect,['16:9','9:16','1:1','4:3'],'画像比率','16:9');
+      const job={id:uid('job'),type:'image',kind:'image',provider:'codex-app-server',status:'queued',prompt,aspect,sceneId:sceneIdValue(draft,args.sceneId),createdAt:now()};
+      draft.jobs.push(job);return job;
+    });}catch(error){imageCount--;throw error;}
+    const projectId=response.state.id,job=response.result;
+    const work=imageQueue.then(async()=>{
+      try{
+        await updateImageProject(projectId,draft=>{requireItem(draft.jobs,job.id,'画像ジョブ').status='running';});
+        const generate=imageGenerator||(await import('./codex-image.mjs')).generateImage;
+        const generated=await generate({prompt:job.prompt,aspect:job.aspect,cwd:path.join(dataDir,'tmp',job.id)});
+        await updateImageProject(projectId,async draft=>{
+          const asset=await importMedia({source:generated.path,originalName:'GPT Image '+job.id+path.extname(generated.path),dataDir,sceneId:draft.storyboard.some(s=>s.id===job.sceneId)?job.sceneId:null});
+          asset.provenance={type:'codex-image',provider:'codex-app-server',billing:'codex-subscription',model:generated.model,prompt:job.prompt,revisedPrompt:generated.revisedPrompt||''};
+          draft.assets.push(asset);Object.assign(requireItem(draft.jobs,job.id,'画像ジョブ'),{status:'completed',completedAt:now(),result:{assetId:asset.id,model:generated.model}});
+        });
+      }catch(error){await updateImageProject(projectId,draft=>{Object.assign(requireItem(draft.jobs,job.id,'画像ジョブ'),{status:'failed',error:String(error.message).slice(0,1500)});});}
+      finally{imageCount--;}
+    });imageQueue=work.catch(()=>{});return response;
+  };
   const exportSnapshot=args=>{
     const prepared=queue.then(()=>{object(args);const format=choice(args.format,['bundle','otio','fcpxml','fcpmodern','edl','render','clips'],'format');const source=snapshot();for(const clip of source.clips)validateClip(source,clip);return {source,format};});
     const work=exportQueue.then(async()=>{const {source,format}=await prepared;const {exportProject}=await import('../exporters/index.mjs');const result=await exportProject(source,{format,dataDir});return {state:snapshot(),result:{...result,projectId:source.id,projectUpdatedAt:source.updatedAt}};});
     prepared.catch(()=>{});exportQueue=work.catch(()=>{});return work;
   };
-  const execute = (command, args = {}) => command==='export.create'?exportSnapshot(args):command === 'project.list' ? library.list().then(projects=>({state:snapshot(),result:{projects}})) : command === 'asset.waveform' ? (async () => {
+  const execute = (command, args = {}) => command==='image.generate'?startImage(args):command==='export.create'?exportSnapshot(args):command === 'project.list' ? library.list().then(projects=>({state:snapshot(),result:{projects}})) : command === 'asset.waveform' ? (async () => {
     object(args);
     const result = await waveform(args.id);
     return { state: snapshot(), result };

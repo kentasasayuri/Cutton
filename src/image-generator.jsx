@@ -1,0 +1,7 @@
+import React,{useState} from 'react';
+import {Sparkles,LoaderCircle} from 'lucide-react';
+import {Field} from './ui';
+export default function ImageGenerator({state,run,busy,selectedScene}){
+  const [error,setError]=useState('');
+  return <section className="image-generator"><h3>GPT Image</h3><form className="panel-form" onSubmit={async e=>{e.preventDefault();setError('');const data=Object.fromEntries(new FormData(e.currentTarget));if(!await run('image.generate',{...data,sceneId:selectedScene||null}))setError('画像生成を開始できませんでした。');}}><Field label="画像の内容"><textarea name="prompt" required maxLength={20000} rows={5} placeholder="動画に使う背景、構図、光、質感などを指示…"/></Field><Field label="比率"><select name="aspect" defaultValue="16:9"><option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option></select></Field><small>Codexの内蔵画像生成を使用。生成画像はこのプロジェクトの素材に追加されます。利用枠はCodexの契約と共有されます。</small><button className="button primary full-width" disabled={!!busy} type="submit"><Sparkles size={14}/>画像を生成</button></form>{error&&<p className="inline-error">{error}</p>}<div className="job-list">{[...state.jobs].filter(j=>j.type==='image').reverse().slice(0,6).map(j=><article className="job" key={j.id}><strong>{j.status==='completed'?'素材へ追加済み':j.status==='failed'?'生成できませんでした':j.status==='queued'?'待機中':'生成中…'}</strong>{['queued','running'].includes(j.status)&&<LoaderCircle size={14} className="spin"/>}<p>{j.prompt}</p>{j.error&&<p className="inline-error">{j.error}</p>}</article>)}</div></section>;
+}

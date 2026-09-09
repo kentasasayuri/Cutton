@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // This is a JSONL App Server client, not a shell command or an MCP client.
 // Protocol: https://developers.openai.com/codex/app-server/
@@ -9,7 +10,7 @@ import { delimiter, dirname, extname, isAbsolute, join, resolve } from 'node:pat
 const MAX_BUFFER = 1024 * 1024;
 const MAX_STDERR = 8000;
 const DEFAULT_TIMEOUT = 180000;
-const NO_TOOLS = [
+export const NO_TOOLS = [
   'shell_tool', 'unified_exec', 'shell_snapshot', 'apps', 'plugins',
   'browser_use', 'browser_use_external', 'in_app_browser', 'computer_use',
   'image_generation', 'multi_agent', 'hooks', 'remote_plugin', 'goals',
@@ -41,6 +42,7 @@ export async function resolveCodexCommand(env = process.env) {
     if (!isAbsolute(explicit)) throw new Error('YACHICUT_CODEX_ENTRYPOINT は絶対パスで指定してください。');
     candidates.push(explicit);
   } else {
+    candidates.push(fileURLToPath(new URL('../node_modules/@openai/codex/bin/codex.js', import.meta.url)));
     if (env.APPDATA) candidates.push(join(env.APPDATA, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'));
     for (const directory of (env.PATH || env.Path || '').split(delimiter).filter(Boolean)) {
       candidates.push(join(directory, 'node_modules', '@openai', 'codex', 'bin', 'codex.js'));
@@ -88,8 +90,9 @@ function safeDiagnostic(stderr) {
     .trim().slice(-1500);
 }
 
-class AppServerClient {
-  constructor(child, { requestTimeoutMs = 30000, stop = stopProcessTree } = {}) {
+export class AppServerClient {
+  constructor(child, { requestTimeoutMs = 30000, stop = stopProcessTree, maxBuffer = MAX_BUFFER } = {}) {
+    this.maxBuffer = maxBuffer;
     this.child = child;
     this.requestTimeoutMs = requestTimeoutMs;
     this.stop = stop;
@@ -125,7 +128,7 @@ class AppServerClient {
   receive(chunk) {
     if (this.closed || this.failure) return;
     this.buffer += chunk;
-    if (Buffer.byteLength(this.buffer) > MAX_BUFFER) return this.fail(new Error('Codex の応答がサイズ上限を超えました。'));
+    if (Buffer.byteLength(this.buffer) > this.maxBuffer) return this.fail(new Error('Codex の応答がサイズ上限を超えました。'));
     let newline;
     while ((newline = this.buffer.indexOf('\n')) !== -1) {
       const line = this.buffer.slice(0, newline).trim();
@@ -211,7 +214,7 @@ function parseObject(text) {
   return object;
 }
 
-function omitNulls(value) {
+export function omitNulls(value) {
   // config/read includes optional nulls; TOML overrides have no null value.
   if (Array.isArray(value)) return value.filter(item => item != null).map(omitNulls);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)

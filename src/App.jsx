@@ -7,6 +7,8 @@ import { isHosted } from './engine';
 import {ClipFields,EditTools,controlKeys} from './clip-inspector';
 import {useEditorTools} from './webmcp';
 import ProjectBrowser from './projects';
+import ProjectLauncher from './project-launcher';
+import ImageGenerator from './image-generator';
 
 const kindNames = { video: '映像', audio: '音声', image: '画像' };
 const decisionNames = { pending: '未判定', accepted: '採用', rejected: '不採用' };
@@ -33,6 +35,7 @@ function ResultPanel({ result, title = '実行結果' }) {
 
 function GenerationPanel({ state, run, busy, selectedScene }) {
   const [result, setResult] = useState(null);
+  const [provider,setProvider]=useState('codex');
   const [workflowText, setWorkflowText] = useState('');
   const workflowUploadRef = useRef(null);
   const [presets, setPresets] = useState([]), [presetId, setPresetId] = useState(''), [generationKind, setGenerationKind] = useState('video');
@@ -46,7 +49,9 @@ function GenerationPanel({ state, run, busy, selectedScene }) {
     const response = await run('generation.submit', { kind: data.kind, prompt: data.prompt, workflow, sceneId: data.sceneId || null, ...(data.seed ? { seed: Number(data.seed) } : {}) });
     if (response) setResult(response.result);
   };
-  return <><div className="inspector-intro"><h3>ComfyUI</h3></div><form className="panel-form" onSubmit={submit}>{presets.length > 0 && <Field label="ワークフロー"><select value={presetId} data-action="generation.preset" onChange={event => { const id = event.target.value; setPresetId(id); const preset = presets.find(item => item.id === id); if (preset) { setWorkflowText(JSON.stringify(preset.workflow, null, 2)); setGenerationKind(preset.kind); } }}><option value="">カスタム</option>{presets.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select>{presetId && <small>{presets.find(preset => preset.id === presetId)?.note}</small>}</Field>}<div className="field-row"><Field label="素材の種類"><select name="kind" value={generationKind} onChange={event => setGenerationKind(event.target.value)} data-action="generation.kind"><option value="video">映像</option><option value="audio">音声</option><option value="image">画像</option></select></Field><Field label="シード値"><input name="seed" type="number" min="0" placeholder="自動" data-action="generation.seed" /></Field></div><Field label="割り当て先"><SceneSelect key={selectedScene || 'empty'} scenes={sortedScenes(state.storyboard)} defaultValue={selectedScene || ''} /></Field><Field label="生成プロンプト"><textarea name="prompt" rows="4" required placeholder="夕方の教室。窓から柔らかい光、ゆっくりと寄るカメラ…" data-action="generation.prompt" /></Field><Field label="ComfyUIワークフロー（API形式）" hint="文字列中の {{prompt}} と {{seed}} を置き換えます。ComfyUI側でモデルと保存ノードを設定してください。"><textarea className="code-input" name="workflow" value={workflowText} onChange={event => setWorkflowText(event.target.value)} rows="8" required placeholder={'{\n  "6": {\n    "class_type": "CLIPTextEncode",\n    "inputs": { "text": "{{prompt}}" }\n  }\n}'} data-action="generation.workflow" /></Field><input ref={workflowUploadRef} type="file" accept="application/json,.json" className="visually-hidden" aria-label="ComfyUI APIワークフローJSON" data-action="generation.workflow.file" onChange={async event => { const file = event.target.files?.[0]; if (!file) return; try { const source = await file.text(); JSON.parse(source); setWorkflowText(source); setResult(null); } catch { setResult({ error: 'JSONファイルを読み取れません。ComfyUIのAPI形式で書き出したファイルを選択してください。' }); } event.target.value = ''; }} /><div className="button-row"><Button icon={FolderOpen} action="generation.workflow.open" onClick={() => workflowUploadRef.current.click()}>JSONを読み込む</Button><a className="button" href={/^https?:\/\//.test(state.settings.comfyUrl) ? state.settings.comfyUrl : 'http://127.0.0.1:8188'} target="_blank" rel="noreferrer" data-action="generation.openComfy"><ExternalLink size={13} />ComfyUIを開く</a></div><div className="inline-note"><ShieldCheck size={14} />生成結果は新規素材として保存されます。</div><button type="submit" className="button primary full-width" data-action="generation.submit" disabled={busy}>{busy === 'generation.submit' ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}ComfyUIで生成</button></form>{result?.error ? <p className="inline-error">{result.error}</p> : <ResultPanel result={result} title="生成ジョブ" />}<Jobs jobs={state.jobs.filter(j => j.type !== 'narration')} run={run} busy={busy} /></>;
+  const providerSelect=<Field label="生成サービス"><select value={provider} onChange={e=>setProvider(e.target.value)}><option value="codex">GPT Image</option><option value="comfy">ComfyUI</option></select></Field>;
+  if(provider==='codex')return <>{providerSelect}<ImageGenerator state={state} run={run} busy={busy} selectedScene={selectedScene}/></>;
+  return <>{providerSelect}<div className="inspector-intro"><h3>ComfyUI</h3></div><form className="panel-form" onSubmit={submit}>{presets.length > 0 && <Field label="ワークフロー"><select value={presetId} data-action="generation.preset" onChange={event => { const id = event.target.value; setPresetId(id); const preset = presets.find(item => item.id === id); if (preset) { setWorkflowText(JSON.stringify(preset.workflow, null, 2)); setGenerationKind(preset.kind); } }}><option value="">カスタム</option>{presets.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select>{presetId && <small>{presets.find(preset => preset.id === presetId)?.note}</small>}</Field>}<div className="field-row"><Field label="素材の種類"><select name="kind" value={generationKind} onChange={event => setGenerationKind(event.target.value)} data-action="generation.kind"><option value="video">映像</option><option value="audio">音声</option><option value="image">画像</option></select></Field><Field label="シード値"><input name="seed" type="number" min="0" placeholder="自動" data-action="generation.seed" /></Field></div><Field label="割り当て先"><SceneSelect key={selectedScene || 'empty'} scenes={sortedScenes(state.storyboard)} defaultValue={selectedScene || ''} /></Field><Field label="生成プロンプト"><textarea name="prompt" rows="4" required placeholder="夕方の教室。窓から柔らかい光、ゆっくりと寄るカメラ…" data-action="generation.prompt" /></Field><Field label="ComfyUIワークフロー（API形式）" hint="文字列中の {{prompt}} と {{seed}} を置き換えます。ComfyUI側でモデルと保存ノードを設定してください。"><textarea className="code-input" name="workflow" value={workflowText} onChange={event => setWorkflowText(event.target.value)} rows="8" required placeholder={'{\n  "6": {\n    "class_type": "CLIPTextEncode",\n    "inputs": { "text": "{{prompt}}" }\n  }\n}'} data-action="generation.workflow" /></Field><input ref={workflowUploadRef} type="file" accept="application/json,.json" className="visually-hidden" aria-label="ComfyUI APIワークフローJSON" data-action="generation.workflow.file" onChange={async event => { const file = event.target.files?.[0]; if (!file) return; try { const source = await file.text(); JSON.parse(source); setWorkflowText(source); setResult(null); } catch { setResult({ error: 'JSONファイルを読み取れません。ComfyUIのAPI形式で書き出したファイルを選択してください。' }); } event.target.value = ''; }} /><div className="button-row"><Button icon={FolderOpen} action="generation.workflow.open" onClick={() => workflowUploadRef.current.click()}>JSONを読み込む</Button><a className="button" href={/^https?:\/\//.test(state.settings.comfyUrl) ? state.settings.comfyUrl : 'http://127.0.0.1:8188'} target="_blank" rel="noreferrer" data-action="generation.openComfy"><ExternalLink size={13} />ComfyUIを開く</a></div><div className="inline-note"><ShieldCheck size={14} />生成結果は新規素材として保存されます。</div><button type="submit" className="button primary full-width" data-action="generation.submit" disabled={busy}>{busy === 'generation.submit' ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}ComfyUIで生成</button></form>{result?.error ? <p className="inline-error">{result.error}</p> : <ResultPanel result={result} title="生成ジョブ" />}<Jobs jobs={state.jobs.filter(j => j.type === 'generation')} run={run} busy={busy} /></>;
 }
 
 function Jobs({ jobs, run, busy, narration = false, onImport }) {
@@ -73,6 +78,7 @@ function SelectionPanel({ state, selected, run, busy, onSelect, onAdd, onConfirm
 }
 
 export default function App() {
+  const [projectChosen,setProjectChosen]=useState(false);
   const [state, setState] = useState(null), [loadError, setLoadError] = useState(''), [connected, setConnected] = useState(false);
   const [selected, setSelected] = useState(null), [sourceId, setSourceId] = useState(null), [tab, setTab] = useState('inspect');
   const [showStoryboard, setShowStoryboard] = useState(false);
@@ -86,18 +92,18 @@ export default function App() {
   const notify = useCallback((message, error = false) => { clearTimeout(toastTimeout.current); setToast({ message, error }); toastTimeout.current = setTimeout(() => setToast(null), error ? 10000 : 4500); }, []);
   const closeModal = useCallback(() => { setModal(null); setResult(null); }, []);
   const run = useCallback(async (command, args = {}, showResult = false) => {
+    if(!projectChosen&&!/^project\.(list|new|switch|open)$/.test(command)){notify('プロジェクトを選択してください',true);return null;}
     setBusy(command);
-    try { const response = await request('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command, args }) }); if (response.state) setState(response.state); if (showResult) { setModal({ type: 'result', title: '実行結果' }); setResult(response.result); } else if (!['generation.refresh'].includes(command)) notify('保存しました'); return response; }
+    try { const response = await request('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command, args }) }); if (response.state) setState(response.state); if (/^project\.(new|switch|open)$/.test(command)) setProjectChosen(true); if (showResult) { setModal({ type: 'result', title: '実行結果' }); setResult(response.result); } else if (!['generation.refresh'].includes(command)) notify('保存しました'); return response; }
     catch (error) { notify(error.message, true); return null; }
     finally { setBusy(''); }
-  }, [notify]);
-  useEditorTools({state,run,capabilities,clock,onProjectChange:()=>{setSelected(null);setSourceId(null);clock.pause();clock.seek(0);}});
+  }, [notify,projectChosen]);
+  useEditorTools({state:projectChosen?state:null,run,capabilities,clock,onProjectChange:()=>{setSelected(null);setSourceId(null);clock.pause();clock.seek(0);}});
 
   useEffect(() => {
-    let alive = true;
-    const load = async () => { try { const next = await request('/api/state'); if (alive) { setState(previous=>previous?.id===next.id&&previous?.updatedAt===next.updatedAt?previous:next); setConnected(true); setLoadError(''); } } catch (error) { if (alive) { setLoadError(error.message); setConnected(false); } } };
+    let alive = true, loading = false, gotCapabilities = false;
+    const load = async () => { if(loading)return;loading=true;try { const next = await request('/api/state'); if (alive) { setState(previous=>previous?.id===next.id&&previous?.updatedAt===next.updatedAt?previous:next); setConnected(true); setLoadError(''); } if(!gotCapabilities){const value=await request('/api/capabilities');if(alive){setCapabilities(value);gotCapabilities=true;}} } catch (error) { if (alive) { setLoadError(error.message); setConnected(false); } } finally{loading=false;} };
     load();
-    request('/api/capabilities').then(next => { if (alive) setCapabilities(next); }).catch(() => {});
     const events = isHosted ? {} : new EventSource('/api/events');
     events.onopen = () => { if (alive) setConnected(true); };
     events.onmessage = event => { try { const next = JSON.parse(event.data); if (alive && next.id && Array.isArray(next.clips)) { setState(next); setConnected(true); } } catch { /* Ignore keep-alive payloads. */ } };
@@ -109,6 +115,7 @@ export default function App() {
   useEffect(() => { if (state) { if (clock.time > clock.duration) clock.seek(clock.duration); clock.notify(); } }, [state, clock]);
   useEffect(() => {
     const handler = event => {
+      if(!projectChosen)return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setModal({ type: 'commands' }); return; }
       if (event.target.closest('input, textarea, select, [contenteditable="true"]') || modal) return;
       if ((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();run(event.shiftKey?'edit.redo':'edit.undo');return;}
@@ -118,7 +125,7 @@ export default function App() {
       if ((event.key === 'Delete' || event.key === 'Backspace') && selected?.type === 'clip' && !busy) { event.preventDefault(); run('timeline.remove', { id: selected.id }); }
     };
     window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler);
-  }, [clock, selected, run, modal, busy]);
+  }, [clock, selected, run, modal, busy, projectChosen]);
 
   const upload = async (files, narration = false) => {
     if (!files?.length) return;
@@ -140,7 +147,9 @@ export default function App() {
   const scenes = useMemo(() => state ? sortedScenes(state.storyboard) : [], [state?.storyboard]);
   const selectedScene = selected?.type === 'scene' ? selected.id : selected?.type === 'asset' ? state?.assets.find(a => a.id === selected.id)?.sceneId : selected?.type === 'clip' ? state?.clips.find(c => c.id === selected.id)?.sceneId : null;
 
-  if (!state) return <main className="boot-screen"><div className="brand-mark"><Scissors size={22} /></div><h1>Cutton</h1>{loadError ? <><p>{loadError}</p><p>ローカルサーバーを起動してから再読み込みしてください。</p><Button icon={RefreshCw} action="app.reload" onClick={() => location.reload()}>再読み込み</Button></> : <><LoaderCircle size={20} className="spin" /><p>編集スタジオを開いています</p></>}</main>;
+  if (!state) return <main className="boot-screen"><div className="brand-mark"><Scissors size={22} /></div><h1>Cutton</h1>{loadError ? <><p>{loadError}</p><p>接続先の制限で止まる場合は、PC側のCuttonで編集できます。</p><a className="button primary" href="http://127.0.0.1:4318/">このPCでCuttonを開く</a><Button icon={RefreshCw} action="app.reload" onClick={() => location.reload()}>再読み込み</Button></> : <><LoaderCircle size={20} className="spin" /><p>編集スタジオを開いています</p></>}</main>;
+
+  if(!projectChosen)return <ProjectLauncher run={run} busy={busy} error={toast?.error?toast.message:loadError}/>;
 
   return <main className="studio" onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); if (!busy) upload(event.dataTransfer.files); } }}>
     <input ref={uploadRef} className="visually-hidden" type="file" multiple accept="video/*,audio/*,image/*,.mkv,.mov,.wav,.flac" aria-label="読み込む素材ファイル" data-action="asset.upload.files" onChange={event => upload(event.target.files)} />
