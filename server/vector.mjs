@@ -20,7 +20,7 @@ export function vectorSvg(state,time,{onlyId}={}){
     const points=Array.from({length:(item.sides||5)*(item.shape==='star'?2:1)},(_,i)=>{const count=(item.sides||5)*(item.shape==='star'?2:1),a=i/count*Math.PI*2-Math.PI/2,r=item.shape==='star'&&i%2?(item.innerRadius||45)/100:1;return [Math.cos(a)*bw/2*r,Math.sin(a)*bh/2*r];});
     const geometry=['polygon','star'].includes(item.shape)?`<polygon points="${points.map(p=>p.join(',')).join(' ')}"/>`:item.shape==='ellipse'?`<ellipse rx="${bw/2}" ry="${bh/2}"/>`:item.shape==='line'?`<path d="M ${-bw/2} 0 L ${bw/2} 0" fill="none"/>`:`<rect x="${-bw/2}" y="${-bh/2}" width="${bw}" height="${bh}" rx="${item.radius||0}"/>`;
     const lines=wrapOverlayText({...item,type:'shape'},w,'graphics').split('\n');
-    const text=lines.map((line,i)=>`<text x="0" y="${(i-(lines.length-1)/2)*item.fontSize*1.25+item.fontSize*.36}" text-anchor="middle" font-family="Meiryo, sans-serif" font-weight="${item.fontWeight||700}" font-size="${item.fontSize}" letter-spacing="${item.tracking||0}" fill="${matte?'#fff':item.textColor||'#fff'}">${esc(line)}</text>`).join('');
+    const text=lines.map((line,i)=>`<text x="0" y="${(i-(lines.length-1)/2)*item.fontSize*1.25+item.fontSize*.36}" text-anchor="middle" font-family="${esc(item.fontFamily||'Meiryo')}" font-weight="${item.fontWeight||700}" font-size="${item.fontSize}" letter-spacing="${item.tracking||0}" fill="${matte?'#fff':item.textColor||'#fff'}">${esc(line)}</text>`).join('');
     const shape=item.shape==='text'?'':geometry;
     const source=items.find(i=>i.id===item.matteId),mask=source&&!matte?` mask="url(#${id}matte)"`:'';
     const clip=item.mask==='ellipse'?`<ellipse rx="${bw/2}" ry="${bh/2}"/>`:`<rect x="${-bw/2}" y="${-bh/2}" width="${bw}" height="${bh}"/>`;

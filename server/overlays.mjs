@@ -1,3 +1,4 @@
+import {validFontFamily} from './font-catalog.mjs';
 import {captionStyle} from './caption-style.mjs';
 // Shared with the preview: keep this module free of Node-only imports.
 export const GRAPHIC_TYPES = ['title', 'lower-third', 'shape', 'kinetic', 'callout', 'frame', 'vector', 'null'];
@@ -47,6 +48,7 @@ export function createOverlay(kind, args = {}, id) {
   };
   if (typeof result.id !== 'string' || !result.id || result.id.length > 200) throw new Error('Invalid overlay id');
   if(kind==='caption')Object.assign(result,captionStyle(args,duration,result.text));
+  if(kind!=='caption'){result.fontFamily=args.fontFamily||'Meiryo';if(!validFontFamily(result.fontFamily))throw new Error('フォント名が不正です。');}
   if (kind === 'graphics') {
     result.rotation = number(args.rotation, 0, 'rotation', -360, 360);
     if(['vector','null'].includes(type)){

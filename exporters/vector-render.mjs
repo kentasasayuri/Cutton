@@ -1,4 +1,5 @@
 import {Resvg} from '@resvg/resvg-js';
+import {renderFontFiles} from '../server/fonts.mjs';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import fs from 'node:fs/promises';
@@ -13,6 +14,7 @@ export async function renderVectorPass(state,folder,{captions=false,crf=18}={}){
   const end=Math.max(0,...[...state.clips,...state.captions,...state.graphics].map(c=>c.start+c.duration));
   const count=Math.ceil(end*state.fps-1e-7);
   const font=process.platform==='win32'?{loadSystemFonts:false,fontFiles:[path.join(process.env.WINDIR||'C:/Windows','Fonts/meiryo.ttc'),path.join(process.env.WINDIR||'C:/Windows','Fonts/meiryob.ttc'),...['YuGothR.ttc','YuGothB.ttc','yumin.ttf','arial.ttf','arialbd.ttf'].map(f=>path.join(process.env.WINDIR||'C:/Windows','Fonts',f))],defaultFontFamily:'Meiryo'}:{loadSystemFonts:true,defaultFontFamily:'sans-serif'};
+  font.fontFiles=[...(font.fontFiles||[]),...await renderFontFiles([...(state.captions||[]),...(state.graphics||[])].map(item=>item.fontFamily))];
   const proc=spawn(process.env.FFMPEG_PATH||'ffmpeg',['-hide_banner','-loglevel','error','-y','-threads','1','-i',source,'-f','image2pipe','-framerate',String(state.fps),'-i','pipe:0','-filter_complex_threads',String(PERFORMANCE.filterThreads),'-filter_complex','[0:v][1:v]overlay=shortest=1:format=auto,format=yuv420p[v]','-map','[v]','-map','0:a?','-c:v','libx264','-preset','veryfast','-crf',String(crf),'-threads',encodeThreads(state.width,state.height),'-c:a','copy','-movflags','+faststart',target],{windowsHide:true,stdio:['pipe','ignore','pipe']});
   let error='',failed=null;proc.stderr.on('data',d=>{error=(error+d).slice(-6000);});
   const done=new Promise((resolve,reject)=>{proc.on('error',reject);proc.on('close',code=>code===0?resolve():reject(new Error(error||`FFmpeg exit ${code}`)));});

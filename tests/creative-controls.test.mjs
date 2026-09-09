@@ -32,7 +32,7 @@ test('caption animations, opacity and escaped SVG remain deterministic across fr
  assert.equal(start.opacity,0);assert.ok(start.y>0);assert.equal(end.opacity,.5);assert.equal(end.y,0);
  const state={width:640,height:360,captions:[c]},a=captionsSvg(state,.6);captionsSvg(state,1);assert.equal(captionsSvg(state,.6),a);
  assert.match(a,/gradientUnits="userSpaceOnUse"/);assert.match(a,/&lt;/);assert.match(a,/test&quot;id/);assert.match(a,/font-family="Yu Gothic"/);assert.match(a,/clipPath/);assert.doesNotMatch(captionsSvg(state,3),/<text/);
- assert.throws(()=>createOverlay('caption',{text:'a',opacity:2}));assert.throws(()=>createOverlay('caption',{text:'a',fontFamily:'invalid'}));
+ assert.throws(()=>createOverlay('caption',{text:'a',opacity:2}));assert.throws(()=>createOverlay('caption',{text:'a',fontFamily:'<script>invalid</script>'}));
 });
 
 test('motion presets expand into valid editable curves and repeaters draw shapes',()=>{

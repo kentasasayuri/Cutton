@@ -1,4 +1,6 @@
 import {PERFORMANCE} from './performance.mjs';
+import {installedFonts,importFont,localFontDir} from './fonts.mjs';
+import {BUNDLED_FONTS} from './font-catalog.mjs';
 import express from 'express';
 import multer from 'multer';
 import path from 'node:path';
@@ -69,6 +71,10 @@ export async function createApp({ dataDir, store: providedStore } = {}) {
   app.use(express.json({ limit: '3mb', strict: true }));
   app.get(['/healthz', '/api/health'], (_req, res) => res.json({ ok: true, app: 'Cutton', version: 1, localOnly: true }));
   app.get('/api/state', (_req, res) => res.json(store.getState()));
+  app.get('/api/fonts',async(_req,res)=>res.json({bundled:BUNDLED_FONTS,custom:await installedFonts()}));
+  const fontUpload=multer({storage:multer.memoryStorage(),limits:{files:1,fileSize:24*1024*1024,fields:0,parts:1}});
+  app.post('/api/fonts/import',fontUpload.single('font'),async(req,res)=>{if(!req.file)throw new AppError('フォントファイルを選択してください。');res.json(await importFont(req.file.buffer));});
+  app.get('/api/fonts/file/:file',async(req,res)=>{if(!/^[a-f0-9]{64}\.(ttf|otf)$/.test(req.params.file))throw new AppError('フォントが見つかりません。',404);res.sendFile(path.join(localFontDir(),req.params.file));});
   app.get('/api/coverage', (_req, res) => res.json(store.coverage()));
   app.get('/api/workflows', async (_req, res) => {
     const presets=[];

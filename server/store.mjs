@@ -1,3 +1,4 @@
+import {alignItems,cutRanges} from './timing-edits.mjs';
 import {mixerSettings,trackSettings} from './audio-mixer.mjs';
 import {soundWav,sfxPresets} from './sfx.mjs';
 import {captionDefaults} from './caption-style.mjs';
@@ -17,7 +18,8 @@ import { projectLibrary } from './project-library.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EPSILON = 0.000001;
 export const COMMANDS = [
-  ['audio.track.update','トラックの音量・バランス・ミュート・ソロ・EQを設定',['lane','volumeDb?','balance?','mute?','solo?','lowDb?','midDb?','highDb?']], ['audio.master.update','マスター音量を設定',['masterDb']], ['sfx.create','内蔵効果音を作成して空き音声トラックに配置',['preset?','duration?','frequency?','levelDb?','seed?','start?','lane?']],
+  ['audio.track.update','トラックの音量・バランス・ミュート・ソロ・EQを設定',['lane','volumeDb?','balance?','mute?','solo?','lowDb?','midDb?','highDb?','lowHz?','midHz?','highHz?','midQ?','highpass?','highpassHz?','lowpass?','lowpassHz?']], ['audio.master.update','マスター音量を設定',['masterDb']], ['sfx.create','内蔵効果音を作成して空き音声トラックに配置',['preset?','duration?','frequency?','levelDb?','seed?','start?','lane?']],
+  ['timeline.align','選択要素をまとめて揃える',['items','mode?','at?','gap?']], ['timeline.cutRanges','全トラックから範囲を除去して字幕・マーカーも詰める',['ranges']], ['timeline.splitAll','全映像・音声を再生位置で分割',['at']],
   ['edit.undo','編集を戻す',[]], ['edit.redo','編集をやり直す',[]], ['timeline.rippleRemove','削除して同じトラックの後続を詰める',['id']], ['timeline.closeGaps','同じトラックの空白を詰める',['track?','lane?']], ['timeline.slip','配置を保持して素材の使用範囲をずらす',['id','offset']], ['marker.add','マーカーを追加',['time','name?']], ['marker.remove','マーカーを削除',['id']],
   ['project.list','保存済みプロジェクト一覧',[]], ['project.switch','プロジェクトを切り替える',['id']], ['project.duplicate','プロジェクトを複製',['name?']], ['project.settings','解像度・フレームレートを設定',['width?','height?','fps?']],
   ['project.rename', 'プロジェクト名を変更', ['name']], ['project.new', '現在をアーカイブして空のプロジェクトを作成', ['name']], ['project.open', '展開した project.cutton.json と素材を読み込む', ['path']],
@@ -32,7 +34,7 @@ export const COMMANDS = [
   ['image.generate','Codexのサブスク枠で画像を生成して素材へ取り込む',['prompt','aspect?','sceneId?']],
   ['narration.prepare', 'Google Vidsへ渡す台本とプロンプトを作成', ['prompt', 'sceneId?', 'mode?', 'language?', 'voice?', 'voiceName?', 'avatarId?', 'delivery?', 'vocalization?', 'direction?']], ['narration.import', 'Vidsの音声またはMP4から音声を取り込む', ['path', 'sceneId?', 'jobId?']],
   ['export.create', 'プロジェクト・編集表・MP4を書き出す', ['format']], ['decisions.export', '採否の判断例をSKILL.mdへ書き出す', []],
-].map(([name, description, args]) => ({ name, description, args: [...args, ...(/^timeline\.(add|update)$/.test(name)?['keyEnabled?','keyColor?','keySimilarity?','keyBlend?','keySpill?']:[]), ...(/^caption\.(add|update)$/.test(name)?Object.keys(captionDefaults).map(k=>k+'?'):[]), ...(/^graphics\.(add|update)$/.test(name)?['rotation?', 'shape?', 'mask?', 'repeat?', 'parentId?', 'matteId?', 'stroke?', 'strokeColor?', 'fillOpacity?', 'sides?', 'innerRadius?', 'gradient?', 'gradientColor?', 'gradientAngle?', 'strokeStart?', 'strokeEnd?', 'strokeAnimation?', 'copies?', 'copyX?', 'copyY?', 'copyRotation?', 'copyOpacity?', 'radius?', 'shadow?', 'glow?', 'wiggle?', 'frequency?', 'tracking?', 'fontWeight?', 'textColor?']:[])] }));
+].map(([name, description, args]) => ({ name, description, args: [...args, ...(/^timeline\.(add|update)$/.test(name)?['cropLeft?','cropRight?','cropTop?','cropBottom?','keyEnabled?','keyColor?','keySimilarity?','keyBlend?','keySpill?']:[]), ...(/^caption\.(add|update)$/.test(name)?Object.keys(captionDefaults).map(k=>k+'?'):[]), ...(/^graphics\.(add|update)$/.test(name)?['fontFamily?','rotation?', 'shape?', 'mask?', 'repeat?', 'parentId?', 'matteId?', 'stroke?', 'strokeColor?', 'fillOpacity?', 'sides?', 'innerRadius?', 'gradient?', 'gradientColor?', 'gradientAngle?', 'strokeStart?', 'strokeEnd?', 'strokeAnimation?', 'copies?', 'copyX?', 'copyY?', 'copyRotation?', 'copyOpacity?', 'radius?', 'shadow?', 'glow?', 'wiggle?', 'frequency?', 'tracking?', 'fontWeight?', 'textColor?']:[])] }));
 
 export function emptyState(name = '新しいプロジェクト', settings = {}) {
   return { id: uid('project'), name, fps: 30, width: 1920, height: 1080, updatedAt: now(), audioMixer:mixerSettings(), storyboard: [], assets: [], clips: [], captions: [], graphics: [], markers: [], decisions: [], jobs: [], settings: { comfyUrl: 'http://127.0.0.1:8188', vidsUrl: '', codexModel: '', ...settings } };
@@ -327,6 +329,16 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
         const marker={id:uid('marker'),time:Math.round(numberValue(args.time,'時刻',{max:86400})*draft.fps)/draft.fps,name:textValue(args.name,'マーカー名',{max:200,fallback:'マーカー'})};draft.markers.push(marker);return marker;
       }
       case 'marker.remove': {requireItem(draft.markers,args.id,'マーカー');draft.markers=draft.markers.filter(m=>m.id!==args.id);return {removedId:args.id};}
+      case 'timeline.align': {
+        const result=alignItems(draft,args);for(const c of draft.clips)validateClip(draft,c);return result;
+      }
+      case 'timeline.cutRanges': {
+        const result=cutRanges(draft,args);for(const c of draft.clips)validateClip(draft,c);return result;
+      }
+      case 'timeline.splitAll': {
+        const at=Math.round(numberValue(args.at,'分割位置')*draft.fps)/draft.fps;let count=0;
+        for(const c of [...draft.clips]){const offset=at-c.start;if(offset<=EPSILON||offset>=c.duration-EPSILON)continue;const second={...c,id:uid('clip'),start:at,in:draft.assets.find(a=>a.id===c.assetId)?.kind==='image'?0:c.in+offset*(c.speed||1),duration:c.duration-offset};c.duration=offset;draft.clips.push(second);count++;}if(!count)throw new AppError('分割できるクリップがありません。');return {count};
+      }
       case 'timeline.slip': {
         const clip=requireItem(draft.clips,args.id,'クリップ');clip.in+=numberValue(args.offset,'オフセット',{min:-86400,max:86400});validateClip(draft,clip);return clip;
       }
