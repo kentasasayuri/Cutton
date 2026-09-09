@@ -32,7 +32,7 @@ export async function renderLayers(state, scratch, run, {lossless=false}={}) {
       if(c.track==='video'){
         const sw=Math.max(2,Math.round(w*c.scale/2)*2),sh=Math.max(2,Math.round(h*c.scale/2)*2);
         const crop=(c.cropLeft||c.cropRight||c.cropTop||c.cropBottom)?`,crop=${Math.round(sw*(1-(c.cropLeft+c.cropRight)/100))}:${Math.round(sh*(1-(c.cropTop+c.cropBottom)/100))}:${Math.round(sw*c.cropLeft/100)}:${Math.round(sh*c.cropTop/100)},pad=${sw}:${sh}:${Math.round(sw*c.cropLeft/100)}:${Math.round(sh*c.cropTop/100)}:color=black@0`:'';
-        const color=`colorchannelmixer=rr=${c.brightness}:gg=${c.brightness}:bb=${c.brightness},eq=contrast=${c.contrast}:saturation=${c.saturation}`;
+        const color=c.brightness===1&&c.contrast===1&&c.saturation===1?'null':`colorchannelmixer=rr=${c.brightness}:gg=${c.brightness}:bb=${c.brightness},eq=contrast=${c.contrast}:saturation=${c.saturation}`;
         const adjust=color+(c.blur?`,gblur=sigma=${c.blur}`:'');
         let visual=`[${index}:v]setpts=(PTS-STARTPTS)/${c.speed},fps=${fps},${adjust}`;
         if(c.keyEnabled){
@@ -42,7 +42,8 @@ export async function renderLayers(state, scratch, run, {lossless=false}={}) {
           visual=`[kadjust${index}][kalpha${index}]alphamerge${c.blur?`,gblur=sigma=${c.blur}`:''}`;
         }
         // Alpha is evaluated at the project's frame time, including partial segments.
-        filters.push(`${visual},format=rgba,scale=${sw}:${sh}:force_original_aspect_ratio=decrease,pad=${sw}:${sh}:(ow-iw)/2:(oh-ih)/2:color=${c.keyEnabled?'black@0':'black'},setsar=1,format=rgba${crop}${c.rotation?`,rotate=${c.rotation*Math.PI/180}:ow=rotw(${c.rotation*Math.PI/180}):oh=roth(${c.rotation*Math.PI/180}):c=none`:''},geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${c.opacity}*${fade.replaceAll('t','T')}'[v${index}]`);
+        const alpha=c.opacity===1&&!c.fadeIn&&!c.fadeOut?'':`,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${c.opacity}*${fade.replaceAll('t','T')}'`;
+        filters.push(`${visual},format=rgba,scale=${sw}:${sh}:force_original_aspect_ratio=decrease,pad=${sw}:${sh}:(ow-iw)/2:(oh-ih)/2:color=${c.keyEnabled?'black@0':'black'},setsar=1,format=rgba${crop}${c.rotation?`,rotate=${c.rotation*Math.PI/180}:ow=rotw(${c.rotation*Math.PI/180}):oh=roth(${c.rotation*Math.PI/180}):c=none`:''}${alpha}[v${index}]`);
         filters.push(`[${last}][v${index}]overlay=x=${n(w*c.x/100)}-w/2:y=${n(h*c.y/100)}-h/2:shortest=0:eof_action=pass[vout${index}]`);last=`vout${index}`;
       }else{
         const tempo=c.speed<.5?`atempo=0.5,atempo=${c.speed/.5}`:c.speed>2?`atempo=2,atempo=${c.speed/2}`:`atempo=${c.speed}`;
