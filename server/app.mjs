@@ -11,7 +11,7 @@ import { AppError, confinedFile, requireItem } from './util.mjs';
 import { mediaMime } from './media.mjs';
 import { createThumbnailService } from './thumbnails.mjs';
 import { createProxyManager } from './proxy.mjs';
-import { createSiteBridge } from './site-bridge.mjs';
+import { createSiteBridge, isEditorNavigation } from './site-bridge.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const loopbackHost = (hostname) => ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname.toLowerCase());
@@ -22,6 +22,7 @@ export function localOnly(req, res, next) {
   let target;
   try { target = new URL(`http://${host}`); } catch { return next(new AppError('Host が不正です。', 403)); }
   if (!host || !loopbackHost(target.hostname) || target.username || target.password || !loopbackAddress(req.socket.remoteAddress)) return next(new AppError('このアプリはローカル接続専用です。', 403));
+  if (isEditorNavigation(req)) { res.set('Cache-Control', 'no-store'); return next(); }
   const origin = req.get('origin');
   if (origin) {
     let caller;
@@ -137,6 +138,7 @@ export async function createApp({ dataDir, store: providedStore } = {}) {
   const dist = path.join(ROOT, 'dist');
   let hasBuild = false; try { await access(path.join(dist, 'index.html')); hasBuild = true; } catch { /* Vite dev server handles the page. */ }
   if (hasBuild) {
+    app.get(['/', '/index.html'], (_req, res) => res.set('Cache-Control','no-store').sendFile(path.join(dist, 'index.html')));
     app.use(express.static(dist, { index: false, maxAge: '1h', dotfiles: 'deny' }));
     app.get('/{*route}', (req, res, next) => { if (req.path.startsWith('/api/') || req.path.startsWith('/media/') || req.path.startsWith('/thumbnail/') || req.path.startsWith('/waveform/') || req.path.startsWith('/proxy/')) return next(); res.sendFile(path.join(dist, 'index.html')); });
   } else app.get('/', (_req, res) => res.type('text/plain').send('Cutton API is ready. Start npm run dev for the editor, or npm run build then restart.'));

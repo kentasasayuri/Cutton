@@ -6,7 +6,7 @@ Sites版とローカル編集エンジンを組み合わせた構成です。最
 
 ## 起動
 
-Sites版: https://cutton.d5hvb7z8cv.chatgpt.site 。このPCで下記の編集エンジンを起動して使います。初回はブラウザがローカルネットワーク接続を確認する場合があります。
+Sites版: https://cutton.d5hvb7z8cv.chatgpt.site 。「Cuttonを起動」、またはデスクトップの「Cutton」から開きます。エンジンの準備後、新規／既存プロジェクトの選択画面が開きます。初回のみ外部アプリを開く確認が出る場合があります。起動済みなら「起動済みのCuttonを開く」で移動します。Sites内で直接編集したい場合は「別の開き方」から接続できます。
 
 このフォルダの `Cuttonを起動.cmd` をダブルクリックします。サーバーは `http://127.0.0.1:4318` で動作します。Codex内では同じURLをブラウザパネルで開けます。
 
@@ -152,3 +152,5 @@ CLI/MCPとHTTPの操作検証、App Serverプロトコル、メディア原本�
 - [FCP 7 XML仕様](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/Elements/Elements.html)
 - [OTIO仕様](https://opentimelineio.readthedocs.io/en/latest/tutorials/otio-file-format-specification.html)
 - [CapCutのプロジェクト互換性](https://www.capcut.com/help/how-to-export-pro-project)
+
+起動の仕組み・確認項目は [docs/STARTUP.md](docs/STARTUP.md) を参照してください。

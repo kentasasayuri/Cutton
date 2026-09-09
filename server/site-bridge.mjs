@@ -2,10 +2,16 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 // The UI is hosted by Sites; only the owner-selected origin may pair with this engine.
 export const SITE_ORIGIN = 'https://cutton.d5hvb7z8cv.chatgpt.site';
+// A document navigation serves only the public editor shell, never project data.
+export const isEditorNavigation = req => req.method === 'GET'
+  && ['/', '/index.html'].includes(req.path)
+  && req.get('sec-fetch-mode') === 'navigate'
+  && req.get('sec-fetch-dest') === 'document';
 export function createSiteBridge(fallback, { origin = SITE_ORIGIN } = {}) {
   const sessions = new Map();
   const same = (a,b) => typeof a === 'string' && /^[a-f0-9]{64}$/.test(a) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
   return (req,res,next) => {
+    if(isEditorNavigation(req))return fallback(req,res,next);
     const caller=req.get('origin');
     const token=req.get('authorization')?.replace(/^Bearer /,'') || req.query.access_token;
     const mediaRequest=req.method==='GET' && /^\/(media|thumbnail|proxy)\/|^\/api\/(download|events)$/.test(req.path);

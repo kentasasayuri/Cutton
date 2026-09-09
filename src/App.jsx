@@ -1,3 +1,4 @@
+import {Startup} from './startup';
 import VoiceDirection from './voice-direction';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, CheckCheck, ChevronDown, Clapperboard, Command, Copy, ExternalLink, FileJson, Film, FolderOpen, Hash, Keyboard, Layers3, Link, LoaderCircle, Mic, Music2, Plus, RefreshCw, Save, Scissors, Settings2, ShieldCheck, Sparkles, Captions, Type, Terminal, Trash2, Upload, WandSparkles, X } from 'lucide-react';
@@ -79,7 +80,13 @@ function SelectionPanel({ state, selected, run, busy, onSelect, onAdd, onConfirm
 }
 
 export default function App() {
+  const [connectHere,setConnectHere]=useState(!isHosted);
+  return connectHere?<Editor/>:<Startup onConnect={()=>setConnectHere(true)}/>;
+}
+
+function Editor() {
   const [projectChosen,setProjectChosen]=useState(false);
+  const [loadAttempt,setLoadAttempt]=useState(0);
   const [state, setState] = useState(null), [loadError, setLoadError] = useState(''), [connected, setConnected] = useState(false);
   const [selected, setSelected] = useState(null), [sourceId, setSourceId] = useState(null), [tab, setTab] = useState('inspect');
   const [showStoryboard, setShowStoryboard] = useState(false);
@@ -102,16 +109,16 @@ export default function App() {
   useEditorTools({state:projectChosen?state:null,run,capabilities,clock,onProjectChange:()=>{setSelected(null);setSourceId(null);clock.pause();clock.seek(0);}});
 
   useEffect(() => {
-    let alive = true, loading = false, gotCapabilities = false;
-    const load = async () => { if(loading)return;loading=true;try { const next = await request('/api/state'); if (alive) { setState(previous=>previous?.id===next.id&&previous?.updatedAt===next.updatedAt?previous:next); setConnected(true); setLoadError(''); } if(!gotCapabilities){const value=await request('/api/capabilities');if(alive){setCapabilities(value);gotCapabilities=true;}} } catch (error) { if (alive) { setLoadError(error.message); setConnected(false); } } finally{loading=false;} };
+    let alive = true, loading = false, gotCapabilities = false, retry;
+    let loadSucceeded=false;
+    const load = async () => { if(loading)return;loading=true;loadSucceeded=false;try { const next = await request('/api/state', {signal:AbortSignal.timeout(5000)}); if (alive) { setState(previous=>previous?.id===next.id&&previous?.updatedAt===next.updatedAt?previous:next); setConnected(true); setLoadError(''); loadSucceeded=true; } if(!gotCapabilities){const value=await request('/api/capabilities');if(alive){setCapabilities(value);gotCapabilities=true;}} } catch (error) { if (alive) { setLoadError(error.message); setConnected(false); } } finally{loading=false;if(alive)retry=setTimeout(load,loadSucceeded?(isHosted?5000:15000):2000);} };
     load();
     const events = isHosted ? {} : new EventSource('/api/events');
     events.onopen = () => { if (alive) setConnected(true); };
     events.onmessage = event => { try { const next = JSON.parse(event.data); if (alive && next.id && Array.isArray(next.clips)) { setState(next); setConnected(true); } } catch { /* Ignore keep-alive payloads. */ } };
     events.onerror = () => { if (alive) setConnected(false); };
-    const poll = setInterval(load, isHosted ? 3000 : 15000);
-    return () => { alive = false; events.close?.(); clearInterval(poll); clearTimeout(toastTimeout.current); };
-  }, []);
+    return () => { alive = false; events.close?.(); clearTimeout(retry); clearTimeout(toastTimeout.current); };
+  }, [loadAttempt]);
 
   useEffect(() => { if (state) { if (clock.time > clock.duration) clock.seek(clock.duration); clock.notify(); } }, [state, clock]);
   useEffect(() => {
@@ -148,7 +155,7 @@ export default function App() {
   const scenes = useMemo(() => state ? sortedScenes(state.storyboard) : [], [state?.storyboard]);
   const selectedScene = selected?.type === 'scene' ? selected.id : selected?.type === 'asset' ? state?.assets.find(a => a.id === selected.id)?.sceneId : selected?.type === 'clip' ? state?.clips.find(c => c.id === selected.id)?.sceneId : null;
 
-  if (!state) return <main className="boot-screen"><div className="brand-mark"><Scissors size={22} /></div><h1>Cutton</h1>{loadError ? <><p>{loadError}</p><p>接続先の制限で止まる場合は、PC側のCuttonで編集できます。</p><a className="button primary" href="http://127.0.0.1:4318/">このPCでCuttonを開く</a><Button icon={RefreshCw} action="app.reload" onClick={() => location.reload()}>再読み込み</Button></> : <><LoaderCircle size={20} className="spin" /><p>編集スタジオを開いています</p></>}</main>;
+  if (!state) return loadError?<Startup waiting detail={loadError} onConnect={()=>setLoadAttempt(n=>n+1)}/>:<main className="boot-screen"><div className="brand-mark"><Scissors size={22}/></div><h1>Cutton</h1><LoaderCircle size={20} className="spin"/><p>プロジェクトを読み込んでいます</p></main>;
 
   if(!projectChosen)return <ProjectLauncher run={run} busy={busy} error={toast?.error?toast.message:loadError}/>;
 
