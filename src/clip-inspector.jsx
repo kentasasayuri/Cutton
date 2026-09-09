@@ -1,0 +1,13 @@
+import React from 'react';
+import {Field,Button} from './ui';
+import {clipControls} from '../server/clip-effects.mjs';
+export const controlKeys=Object.keys(clipControls());
+export function ClipFields({clip}){
+  const c={...clipControls(),...clip};
+  const fields=clip.track==='video'?[['x','位置 X (%)',-100,200],['y','位置 Y (%)',-100,200],['scale','拡大率',.05,4],['rotation','回転 (°)',-360,360],['opacity','不透明度',0,1],['brightness','明るさ',0,2],['contrast','コントラスト',0,3],['saturation','彩度',0,3],['blur','ぼかし (px)',0,40]]:[];
+  return <><div className="inspector-section-title">トラック・リタイム</div><div className="field-row"><Field label="トラック"><select name="lane" defaultValue={c.lane}>{Array.from({length:8},(_,i)=><option key={i} value={i}>{clip.track==='video'?'V':'A'}{i+1}</option>)}</select></Field><Field label="再生速度"><input name="speed" type="number" min=".25" max="4" step=".05" defaultValue={c.speed}/></Field></div>{fields.length>0&&<div className="inspector-section-title">変形・カラー</div>}<div className="effect-fields">{[...fields,['fadeIn','フェードイン (秒)',0,60],['fadeOut','フェードアウト (秒)',0,60]].map(([key,label,min,max])=><Field label={label} key={key}><input type="number" name={key} min={min} max={max} step=".01" defaultValue={c[key]} data-action={`timeline.${key}`}/></Field>)}</div></>;
+}
+export function EditTools({state,clock,selected,run,busy}){
+  const clip=selected?.type==='clip'&&state.clips.find(c=>c.id===selected.id);
+  return <div className="edit-tools"><Button disabled={busy} onClick={()=>run('edit.undo')}>↶ 戻す</Button><Button disabled={busy} onClick={()=>run('edit.redo')}>↷ やり直す</Button><Button disabled={!clip||busy} onClick={()=>run('timeline.rippleRemove',{id:clip.id})}>リップル削除</Button><Button disabled={busy} onClick={()=>run('timeline.closeGaps',{track:clip?.track||'video',lane:clip?.lane||0})}>空白を詰める</Button><Button disabled={busy} onClick={()=>run('marker.add',{time:clock.time,name:`マーカー ${(state.markers?.length||0)+1}`})}>マーカー＋</Button>{(state.markers||[]).map(m=><span className="marker-chip" key={m.id}><button onClick={()=>clock.seek(m.time)}>{m.name} · {m.time.toFixed(2)}s</button><button aria-label={`${m.name}を削除`} onClick={()=>run('marker.remove',{id:m.id})}>×</button></span>)}</div>;
+}

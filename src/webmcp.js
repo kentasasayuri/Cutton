@@ -1,0 +1,13 @@
+import {useEffect,useRef} from 'react';
+export function useEditorTools({state,run,capabilities,clock,onProjectChange}){
+  const latest=useRef({state,run,clock,onProjectChange});latest.current={state,run,clock,onProjectChange};
+  useEffect(()=>{
+    const context=document.modelContext;if(!context?.registerTool||!capabilities)return;
+    const lifecycle=new AbortController();
+    const commands=(capabilities.commands||[]).map(c=>c.name);
+    const register=tool=>{try{Promise.resolve(context.registerTool(tool,{signal:lifecycle.signal})).catch(e=>console.warn('Cutton tool registration:',e.message));}catch(e){console.warn('Cutton tool registration:',e.message);}};
+    register({name:'cutton_get_project',title:'Cutton プロジェクトを読む',description:'Read the current project, media IDs, clips, graphics, markers and playhead. No edits.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute:input=>{if(input&&Object.keys(input).length)throw new Error('No arguments accepted');const s=latest.current.state;if(!s)throw new Error('Editing engine is disconnected');return {id:s.id,name:s.name,width:s.width,height:s.height,fps:s.fps,clips:s.clips,graphics:s.graphics,captions:s.captions,markers:s.markers,assets:s.assets.map(a=>({id:a.id,name:a.name,kind:a.kind,duration:a.duration})),time:latest.current.clock.time};}});
+    register({name:'cutton_execute_command',title:'Cutton の編集コマンドを実行',description:'Execute and save an explicit editing command through the same dispatcher as the UI and CLI. project.new/switch/open changes the active project; export.create writes a file; generation.submit sends a ComfyUI job. Read project IDs first. Returns only after completion.',inputSchema:{type:'object',properties:{command:{type:'string',enum:commands},args:{type:'object'}},required:['command','args'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:true},execute:async input=>{if(!input||!commands.includes(input.command)||!input.args||typeof input.args!=='object'||Array.isArray(input.args)||Object.keys(input).some(k=>!['command','args'].includes(k)))throw new Error('Invalid command or arguments');const response=await latest.current.run(input.command,input.args);if(!response)throw new Error('Command failed; no edit was saved');if(/^project\.(new|switch|open|duplicate)$/.test(input.command))latest.current.onProjectChange();await new Promise(requestAnimationFrame);return {projectId:response.state.id,result:response.result};}});
+    return()=>lifecycle.abort();
+  },[capabilities]);
+}

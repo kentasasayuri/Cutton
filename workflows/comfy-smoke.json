@@ -1,0 +1,12 @@
+{
+  "1": {
+    "class_type": "EmptyImage",
+    "inputs": { "width": 320, "height": 180, "batch_size": 1, "color": 1720681 },
+    "_meta": { "title": "接続テスト用の単色画像（AI生成ではありません）" }
+  },
+  "2": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["1", 0], "filename_prefix": "Cutton_connection_test" },
+    "_meta": { "title": "接続テスト画像を保存" }
+  }
+}
