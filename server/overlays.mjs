@@ -48,6 +48,7 @@ export function createOverlay(kind, args = {}, id) {
   if (typeof result.id !== 'string' || !result.id || result.id.length > 200) throw new Error('Invalid overlay id');
   if(kind==='caption')Object.assign(result,captionStyle(args,duration,result.text));
   if (kind === 'graphics') {
+    result.rotation = number(args.rotation, 0, 'rotation', -360, 360);
     if(['vector','null'].includes(type)){
       result.shape=choice(args.shape,'rect',['rect','ellipse','line','text','polygon','star'],'shape');
       result.mask=choice(args.mask,'none',['none','rect','ellipse'],'mask');
@@ -109,7 +110,7 @@ export function evaluateOverlayTransform(item, relativeTime) {
     }
     return { ...list.at(-1) };
   }
-  const value = { x: item.x, y: item.y, scale: 1, rotation: 0, opacity: 1 };
+  const value = { x: item.x, y: item.y, scale: 1, rotation: item.rotation || 0, opacity: 1 };
   if (item.animation === 'fade') {
     const fade = Math.min(0.25, item.duration / 2);
     value.opacity = Math.max(0, Math.min(1, time / fade, (item.duration - time) / fade));

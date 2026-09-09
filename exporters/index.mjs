@@ -224,6 +224,7 @@ export async function exportProject(state,{format='bundle',dataDir}) {
   const name=`${safeName(state.name)}-${new Date().toISOString().replace(/[:.]/g,'-')}-${randomUUID().slice(0,6)}`;
   const folder=path.join(exportsDir,name);await fs.mkdir(folder);
   const warnings=[];
+  if(format!=='render'&&(state.audioMixer||state.clips.some(c=>c.keyEnabled)))warnings.push('トラックミキサーとクロマキーはCuttonプロジェクトJSONに保持します。XML/OTIOでは再現しません。見た目と音を引き継ぐにはMP4を使用してください。');
   if(needsLayerRender(state)&&!['render','bundle','clips','fcpmodern'].includes(format))throw new Error('複数トラック・速度・エフェクトを含む編集は FCPXML、MP4 またはプロジェクトバンドルで書き出してください。');
   const sidecars=[];
   if(state.captions?.length){const file=path.join(folder,'captions.srt');await fs.writeFile(file,toCaptionsSrt(state),'utf8');sidecars.push(file);}

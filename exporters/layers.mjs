@@ -1,14 +1,16 @@
+import {mixerSettings,mixerChanged,mixerFilters,dbGain} from '../server/audio-mixer.mjs';
+import {keyFilter} from '../server/chroma-key.mjs';
 import {encodeThreads,PERFORMANCE} from '../server/performance.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EFFECT_DEFAULTS } from '../server/clip-effects.mjs';
 
-export const needsLayerRender = state => state.clips.some(c => c.lane>0 || (c.speed??1)!==1 || Object.entries(EFFECT_DEFAULTS).some(([k,v])=>(c[k]??v)!==v));
+export const needsLayerRender = state => mixerChanged(state.audioMixer) || state.clips.some(c => c.lane>0 || (c.speed??1)!==1 || Object.entries(EFFECT_DEFAULTS).some(([k,v])=>(c[k]??v)!==v));
 const n=v=>Number(v.toFixed(7));
 // Split at edit boundaries. Only the sources visible in this segment are decoded;
 // no full-project frame buffer, and every FFmpeg encoder/filter uses one thread.
 export async function renderLayers(state, scratch, run, {lossless=false}={}) {
-  const {width:w,height:h,fps}=state;
+  const {width:w,height:h,fps}=state,mixer=mixerSettings(state.audioMixer);
   const total=Math.ceil(Math.max(0,...[...state.clips,...(state.captions||[]),...(state.graphics||[])].map(c=>c.start+c.duration))*fps-1e-7)/fps;
   if(!total)throw new Error('タイムラインが空です。');
   const clips=state.clips.filter(c=>!c.muted);
@@ -29,17 +31,25 @@ export async function renderLayers(state, scratch, run, {lossless=false}={}) {
       const fade=`min(1,min(${c.fadeIn?`(t+${n(offset)})/${c.fadeIn}`:'1'},${c.fadeOut?`(${n(c.duration-offset)}-t)/${c.fadeOut}`:'1'}))`;
       if(c.track==='video'){
         const sw=Math.max(2,Math.round(w*c.scale/2)*2),sh=Math.max(2,Math.round(h*c.scale/2)*2);
-        const adjust=`colorchannelmixer=rr=${c.brightness}:gg=${c.brightness}:bb=${c.brightness},eq=contrast=${c.contrast}:saturation=${c.saturation}${c.blur?`,gblur=sigma=${c.blur}`:''}`;
+        const color=`colorchannelmixer=rr=${c.brightness}:gg=${c.brightness}:bb=${c.brightness},eq=contrast=${c.contrast}:saturation=${c.saturation}`;
+        const adjust=color+(c.blur?`,gblur=sigma=${c.blur}`:'');
+        let visual=`[${index}:v]setpts=(PTS-STARTPTS)/${c.speed},fps=${fps},${adjust}`;
+        if(c.keyEnabled){
+          filters.push(`[${index}:v]setpts=(PTS-STARTPTS)/${c.speed},fps=${fps}${keyFilter(c)},format=rgba,split[kcolor${index}][kmatte${index}]`);
+          filters.push(`[kmatte${index}]alphaextract[kalpha${index}]`);
+          filters.push(`[kcolor${index}]${color},format=rgba[kadjust${index}]`);
+          visual=`[kadjust${index}][kalpha${index}]alphamerge${c.blur?`,gblur=sigma=${c.blur}`:''}`;
+        }
         // Alpha is evaluated at the project's frame time, including partial segments.
-        filters.push(`[${index}:v]setpts=(PTS-STARTPTS)/${c.speed},fps=${fps},scale=${sw}:${sh}:force_original_aspect_ratio=decrease,pad=${sw}:${sh}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,${adjust},format=rgba${c.rotation?`,rotate=${c.rotation*Math.PI/180}:ow=rotw(${c.rotation*Math.PI/180}):oh=roth(${c.rotation*Math.PI/180}):c=none`:''},geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${c.opacity}*${fade.replaceAll('t','T')}'[v${index}]`);
+        filters.push(`${visual},format=rgba,scale=${sw}:${sh}:force_original_aspect_ratio=decrease,pad=${sw}:${sh}:(ow-iw)/2:(oh-ih)/2:color=${c.keyEnabled?'black@0':'black'},setsar=1,format=rgba${c.rotation?`,rotate=${c.rotation*Math.PI/180}:ow=rotw(${c.rotation*Math.PI/180}):oh=roth(${c.rotation*Math.PI/180}):c=none`:''},geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${c.opacity}*${fade.replaceAll('t','T')}'[v${index}]`);
         filters.push(`[${last}][v${index}]overlay=x=${n(w*c.x/100)}-w/2:y=${n(h*c.y/100)}-h/2:shortest=0:eof_action=pass[vout${index}]`);last=`vout${index}`;
       }else{
         const tempo=c.speed<.5?`atempo=0.5,atempo=${c.speed/.5}`:c.speed>2?`atempo=2,atempo=${c.speed/2}`:`atempo=${c.speed}`;
-        filters.push(`[${index}:a]asetpts=PTS-STARTPTS,${tempo},aresample=48000,volume='${c.gain??1}*${fade}':eval=frame,apad,atrim=duration=${duration}[a${index}]`);audio.push(`[a${index}]`);
+        filters.push(`[${index}:a]asetpts=PTS-STARTPTS,${tempo},aresample=48000,volume='${c.gain??1}*${fade}':eval=frame,${mixerFilters(mixer,c.lane||0)},apad,atrim=duration=${duration}[a${index}]`);audio.push(`[a${index}]`);
       }
     });
     filters.push(`[${last}]trim=duration=${duration},format=yuv420p[vfinal]`);
-    filters.push(`[silence]${audio.join('')}amix=inputs=${audio.length+1}:normalize=0:duration=first,alimiter=limit=0.98:level=0:latency=1[afinal]`);
+    filters.push(`[silence]${audio.join('')}amix=inputs=${audio.length+1}:normalize=0:duration=first,volume=${dbGain(mixer.masterDb)},alimiter=limit=0.98:level=0:latency=1[afinal]`);
     const file=`layer-${String(i).padStart(5,'0')}.mkv`;
     await run([...inputs,'-filter_complex_threads',String(PERFORMANCE.filterThreads),'-filter_complex',filters.join(';'),'-map','[vfinal]','-map','[afinal]','-t',String(duration),'-c:v','libx264','-preset','veryfast','-crf',lossless?'0':'18','-threads',encodeThreads(state.width,state.height),'-c:a','pcm_s16le',path.join(scratch,file)]);
     files.push(file);

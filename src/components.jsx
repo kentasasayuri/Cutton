@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, useMemo, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Clapperboard, Film, Image, Layers3, LoaderCircle, Maximize, Mic, MoreHorizontal, Music2, Pause, Play, Plus, Scissors, Search, SkipBack, SkipForward, Sparkles, Trash2, Upload, Volume2, VolumeX, X } from 'lucide-react';
 import { bytes, timecode } from './model';
 import Waveform from './waveform';
@@ -6,6 +6,7 @@ import { engineUrl } from './engine';
 import { OverlayPreview } from './overlays';
 import { usePreviewMedia } from './preview-media';
 import MediaLayers from './media-layers';
+import DirectManipulation from './direct-manipulation';
 import { syncMediaElement } from './playback';
 
 export { Button, Field } from './ui';
@@ -22,7 +23,10 @@ export function Timecode({ clock, fps = 30, className = '' }) {
   return <span ref={element} className={`timecode ${className}`}>{timecode(clock.time, fps)}</span>;
 }
 
-export const Player = memo(function Player({ state, clock, selectedAsset, sourceCandidate, onSelectSource, onClearAsset, selected, onOverlaySelect }) {
+export const Player = memo(function Player({ state, clock, selectedAsset, sourceCandidate, onSelectSource, onClearAsset, selected, onOverlaySelect, onTransform, busy }) {
+  const [draft,setDraft]=useState(null);
+  const previewState=useMemo(()=>{if(!draft)return state;const field={clip:'clips',graphic:'graphics',caption:'captions'}[draft.kind];return {...state,[field]:state[field].map(item=>item.id===draft.id?{...item,...draft.fields}:item)};},[state,draft]);
+  useEffect(()=>setDraft(null),[state.id]);
   const videoRef = useRef(null), audioRef = useRef(null), screenRef = useRef(null);
   const [active, setActive] = useState({ video: null, audio: null });
   const [playing, setPlaying] = useState(false);
@@ -76,9 +80,10 @@ export const Player = memo(function Player({ state, clock, selectedAsset, source
     <div className="panel-heading"><div className="viewer-tabs"><button className={!selectedAsset ? 'active' : ''} aria-pressed={!selectedAsset} data-action="preview.program" onClick={onClearAsset}>プログラム</button><button className={selectedAsset ? 'active' : ''} aria-pressed={!!selectedAsset} disabled={!sourceCandidate && !selectedAsset && !videoAsset} data-action="preview.source" onClick={() => onSelectSource(sourceCandidate || selectedAsset || videoAsset)}>ソース</button></div><select className="preview-quality" aria-label="プレビュー画質" data-action="preview.quality" value={preview.quality} onChange={event => preview.setQuality(event.target.value)}><option value="360">360p</option><option value="540">540p</option><option value="720">720p</option><option value="original">オリジナル</option></select></div>
     <div className="preview-screen" ref={screenRef}>
       <div className="program-stage" style={selectedAsset ? { width: '100%', height: '100%' } : projectSize}>
-      {!selectedAsset ? <MediaLayers state={state} clock={clock} onError={setPreviewError}/> : visible?.kind === 'image' ? <img src={visible.url} alt={visible.name} className="preview-media" /> : visible?.kind === 'video' && !preview.url ? <div className="proxy-loading">{preview.proxy?.status === 'error' ? <><p>{preview.proxy.error || 'プレビューの準備に失敗しました'}</p><Button action="preview.originalFallback" onClick={() => preview.setQuality('original')}>オリジナルで再生</Button></> : <><LoaderCircle size={18} className="spin" /><span>プレビューを準備中</span></>}</div> : visible?.kind === 'video' ? <video key={visible.id} ref={videoRef} data-asset={visible.id} src={preview.url} className="preview-media" preload="metadata" muted controls={!!selectedAsset} onLoadedMetadata={() => clock.notify()} onCanPlay={() => clock.notify()} playsInline onError={() => setPreviewError('この形式はブラウザで再生できません。MP4（H.264）などのプレビュー用素材を使用してください。')} /> : selectedAsset?.kind === 'audio' ? <div className="audio-source"><Music2 size={43} /><strong>{selectedAsset.name}</strong><audio src={selectedAsset.url} controls preload="metadata" /></div> : <div className="preview-placeholder"><p>{state.clips.length ? '' : 'メディアをタイムラインに追加'}</p></div>}
+      {!selectedAsset ? <MediaLayers state={previewState} clock={clock} onError={setPreviewError}/> : visible?.kind === 'image' ? <img src={visible.url} alt={visible.name} className="preview-media" /> : visible?.kind === 'video' && !preview.url ? <div className="proxy-loading">{preview.proxy?.status === 'error' ? <><p>{preview.proxy.error || 'プレビューの準備に失敗しました'}</p><Button action="preview.originalFallback" onClick={() => preview.setQuality('original')}>オリジナルで再生</Button></> : <><LoaderCircle size={18} className="spin" /><span>プレビューを準備中</span></>}</div> : visible?.kind === 'video' ? <video key={visible.id} ref={videoRef} data-asset={visible.id} src={preview.url} className="preview-media" preload="metadata" muted controls={!!selectedAsset} onLoadedMetadata={() => clock.notify()} onCanPlay={() => clock.notify()} playsInline onError={() => setPreviewError('この形式はブラウザで再生できません。MP4（H.264）などのプレビュー用素材を使用してください。')} /> : selectedAsset?.kind === 'audio' ? <div className="audio-source"><Music2 size={43} /><strong>{selectedAsset.name}</strong><audio src={selectedAsset.url} controls preload="metadata" /></div> : <div className="preview-placeholder"><p>{state.clips.length ? '' : 'メディアをタイムラインに追加'}</p></div>}
       {false && audioAsset && <audio key={audioAsset.id} ref={audioRef} data-asset={audioAsset.id} src={audioAsset.url} preload="metadata" onLoadedMetadata={() => clock.notify()} onCanPlay={() => clock.notify()} onError={() => setPreviewError('音声プレビューに失敗しました。ブラウザ対応の音声形式を確認してください。')} />}
-      {!selectedAsset && <OverlayPreview state={state} clock={clock} selected={selected} onSelect={onOverlaySelect} />}
+      {!selectedAsset && <OverlayPreview state={previewState} clock={clock} selected={selected} onSelect={onOverlaySelect} />}
+      {!selectedAsset&&<DirectManipulation state={previewState} clock={clock} selected={selected} onSelect={onOverlaySelect} onDraft={setDraft} onCommit={onTransform} busy={busy}/>}
       </div>
       {selectedAsset && <Button className="back-to-timeline" icon={ArrowLeft} action="preview.timeline" onClick={onClearAsset}>タイムラインに戻る</Button>}
       {previewError && <div className="preview-error">{previewError}</div>}

@@ -9,21 +9,13 @@ import { timecode } from './model';
 
 import { evaluateOverlayTransform as evaluateTransform, wrapOverlayText } from '../server/overlays.mjs';
 
-const graphicPresets = [
-  {id:'vector',name:'ベクターコンポジション',type:'vector',text:'CUTTON / MOTION',x:50,y:50,width:68,height:24,fontSize:70,color:'#13243b',animation:'none',shape:'rect',gradient:true,gradientColor:'#287880',radius:2,stroke:2,strokeColor:'#75ead9',textColor:'#ffffff',tracking:5,shadow:9,keyframes:[{time:0,x:50,y:60,scale:.85,rotation:-3,opacity:0,easing:'bezier',bezier:[.16,1,.3,1]},{time:1,x:50,y:50,scale:1,rotation:0,opacity:1,easing:'linear'}]},
-  {id:'null',name:'ヌル（親レイヤー）',type:'null',text:'親レイヤー',x:50,y:50,width:10,height:10,fontSize:40,color:'#ffffff',animation:'none'},
-  { id: 'kinetic', name: 'キネティックタイトル', type: 'kinetic', text: 'YOUR NEXT CHAPTER', x: 50, y: 48, width: 65, height: 18, fontSize: 76, color: '#37cbd6', animation: 'none', keyframes: [{ time: 0, x: 50, y: 57, scale: .92, rotation: 0, opacity: 0, easing: 'ease-in-out' }, { time: .45, x: 50, y: 48, scale: 1, rotation: 0, opacity: 1, easing: 'linear' }] },
-  { id: 'lower-third', name: 'ローワーサード', type: 'lower-third', text: '名前 / タイトル', x: 30, y: 81, width: 42, height: 10, fontSize: 40, color: '#315b65', animation: 'slide-up' },
-  { id: 'callout', name: 'コールアウト', type: 'callout', text: 'ポイントをここに入力', x: 68, y: 40, width: 42, height: 18, fontSize: 42, color: '#37cbd6', animation: 'fade' },
-  { id: 'frame', name: 'フレーム', type: 'frame', text: 'FOCUS', x: 50, y: 50, width: 68, height: 45, fontSize: 62, color: '#ffffff', animation: 'fade' },
-  { id: 'title', name: 'タイトル', type: 'title', text: 'タイトルを入力', x: 50, y: 50, width: 70, height: 18, fontSize: 72, color: '#ffffff', animation: 'fade' },
-  { id: 'shape', name: 'シェイプ', type: 'shape', text: '', x: 50, y: 50, width: 45, height: 30, fontSize: 48, color: '#315b65', animation: 'none' },
-];
+import {graphicPresets} from '../server/graphic-presets.mjs';
 
 function OverlayForm({ item, kind, state, clock, run, busy, onSelect, onNew }) {
   const caption = kind === 'caption';
   const initial = useMemo(() => item || (caption ? { text: '', start: Math.round(clock.time * 1000) / 1000, duration: 3, x: 50, y: 88, fontSize: 48, color: '#ffffff' } : { ...graphicPresets[0], start: Math.round(clock.time * 1000) / 1000, duration: 4 }), [item?.id, caption]);
   const [draft, setDraft] = useState(initial);
+  const [presetId,setPresetId]=useState(item?'':graphicPresets[0].id);
   const itemSnapshot = JSON.stringify(item || null);
   useEffect(() => { if (item) setDraft(item); }, [itemSnapshot]);
   const set = (key, value) => setDraft(previous => ({ ...previous, [key]: value }));
@@ -48,7 +40,7 @@ function OverlayForm({ item, kind, state, clock, run, busy, onSelect, onNew }) {
   };
   return <form className="overlay-form" onSubmit={save}>
     <div className="overlay-edit-heading"><h3>{item ? caption ? '字幕を編集' : 'グラフィックを編集' : caption ? '字幕を追加' : 'グラフィックを追加'}</h3>{item && <Button icon={Plus} action={`${kind}.new`} title="新規追加" aria-label="新規追加" onClick={onNew} />}</div>
-    {!caption && <Field label="テンプレート"><select value={draft.type} data-action="graphics.preset" onChange={event => { const preset = graphicPresets.find(p => p.type === event.target.value); setDraft(previous => ({ ...previous, ...preset, keyframes: preset.keyframes ? structuredClone(preset.keyframes) : [] })); }}>{graphicPresets.map(preset => <option key={preset.id} value={preset.type}>{preset.name}</option>)}</select></Field>}
+    {!caption && <Field label="テンプレート"><select value={presetId} data-action="graphics.preset" onChange={event => { const preset = graphicPresets.find(p => p.id === event.target.value); if(!preset)return;setPresetId(preset.id); setDraft(previous => ({ ...previous, ...preset, duration:Math.max(previous.duration||4,4), keyframes: preset.keyframes ? structuredClone(preset.keyframes) : [] })); }}><option value="">カスタム</option>{graphicPresets.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></Field>}
     <Field label="テキスト"><textarea rows="3" value={draft.text} required={caption || !['shape', 'frame', 'vector', 'null'].includes(draft.type)} data-action={`${kind}.text`} onChange={event => setDraft(previous=>({...previous,text:event.target.value,...(caption?{words:[]}: {})}))} placeholder={caption ? '字幕を入力' : 'テキストを入力'} /></Field>
     <div className="field-row">{numeric('start', '開始（秒）', { min: 0, step: .001 })}{numeric('duration', '長さ（秒）', { min: .1, step: .001 })}</div>
     <div className="inspector-section-title">変形</div>

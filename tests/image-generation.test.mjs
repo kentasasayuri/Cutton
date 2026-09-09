@@ -26,7 +26,8 @@ test('background images remain in submitting project after switching; errors are
   const submitted=await store.execute('image.generate',{prompt:'teal background'});
   await started;
   await store.execute('project.new',{name:'別のプロジェクト'});release();
-  for(let i=0;i<100;i++){const saved=JSON.parse(await readFile(path.join(root,'library',id+'.json'),'utf8'));if(saved.jobs[0].status==='completed')break;await new Promise(r=>setTimeout(r,25));}
+  const deadline=Date.now()+10000;
+  while(true){const saved=JSON.parse(await readFile(path.join(root,'library',id+'.json'),'utf8'));if(saved.jobs[0].status==='completed')break;assert.notEqual(saved.jobs[0].status,'failed',saved.jobs[0].error);assert.ok(Date.now()<deadline,'Image import did not finish before timeout');await new Promise(r=>setTimeout(r,25));}
   assert.equal(store.getState().assets.length,0);
   await store.execute('project.switch',{id});assert.equal(store.getState().assets.length,1);assert.equal(store.getState().jobs[0].id,submitted.result.id);assert.equal(store.getState().jobs[0].status,'completed');
   assert.equal(store.getState().assets[0].provenance.type,'codex-image');

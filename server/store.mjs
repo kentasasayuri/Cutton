@@ -1,8 +1,10 @@
+import {mixerSettings,trackSettings} from './audio-mixer.mjs';
+import {soundWav,sfxPresets} from './sfx.mjs';
 import {captionDefaults} from './caption-style.mjs';
 import {prepareVidsScript,voiceDirection} from './vids-voices.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, stat, unlink } from 'node:fs/promises';
 import { AppError, uid, now, object, textValue, numberValue, choice, booleanValue, requireItem, sceneIdValue, atomicJson, seconds, confinedFile } from './util.mjs';
 import { importMedia, extractNarration, verifyAsset, binaryStatus, FFMPEG, FFPROBE, localMediaPath } from './media.mjs';
 import { comfyBase, vidsLink, checkComfy, submitGeneration, refreshGeneration } from './integrations.mjs';
@@ -15,6 +17,7 @@ import { projectLibrary } from './project-library.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EPSILON = 0.000001;
 export const COMMANDS = [
+  ['audio.track.update','トラックの音量・バランス・ミュート・ソロ・EQを設定',['lane','volumeDb?','balance?','mute?','solo?','lowDb?','midDb?','highDb?']], ['audio.master.update','マスター音量を設定',['masterDb']], ['sfx.create','内蔵効果音を作成して空き音声トラックに配置',['preset?','duration?','frequency?','levelDb?','seed?','start?','lane?']],
   ['edit.undo','編集を戻す',[]], ['edit.redo','編集をやり直す',[]], ['timeline.rippleRemove','削除して同じトラックの後続を詰める',['id']], ['timeline.closeGaps','同じトラックの空白を詰める',['track?','lane?']], ['timeline.slip','配置を保持して素材の使用範囲をずらす',['id','offset']], ['marker.add','マーカーを追加',['time','name?']], ['marker.remove','マーカーを削除',['id']],
   ['project.list','保存済みプロジェクト一覧',[]], ['project.switch','プロジェクトを切り替える',['id']], ['project.duplicate','プロジェクトを複製',['name?']], ['project.settings','解像度・フレームレートを設定',['width?','height?','fps?']],
   ['project.rename', 'プロジェクト名を変更', ['name']], ['project.new', '現在をアーカイブして空のプロジェクトを作成', ['name']], ['project.open', '展開した project.cutton.json と素材を読み込む', ['path']],
@@ -29,10 +32,10 @@ export const COMMANDS = [
   ['image.generate','Codexのサブスク枠で画像を生成して素材へ取り込む',['prompt','aspect?','sceneId?']],
   ['narration.prepare', 'Google Vidsへ渡す台本とプロンプトを作成', ['prompt', 'sceneId?', 'mode?', 'language?', 'voice?', 'voiceName?', 'avatarId?', 'delivery?', 'vocalization?', 'direction?']], ['narration.import', 'Vidsの音声またはMP4から音声を取り込む', ['path', 'sceneId?', 'jobId?']],
   ['export.create', 'プロジェクト・編集表・MP4を書き出す', ['format']], ['decisions.export', '採否の判断例をSKILL.mdへ書き出す', []],
-].map(([name, description, args]) => ({ name, description, args: [...args, ...(/^caption\.(add|update)$/.test(name)?Object.keys(captionDefaults).map(k=>k+'?'):[]), ...(/^graphics\.(add|update)$/.test(name)?['shape?', 'mask?', 'repeat?', 'parentId?', 'matteId?', 'stroke?', 'strokeColor?', 'fillOpacity?', 'sides?', 'innerRadius?', 'gradient?', 'gradientColor?', 'gradientAngle?', 'strokeStart?', 'strokeEnd?', 'strokeAnimation?', 'copies?', 'copyX?', 'copyY?', 'copyRotation?', 'copyOpacity?', 'radius?', 'shadow?', 'glow?', 'wiggle?', 'frequency?', 'tracking?', 'fontWeight?', 'textColor?']:[])] }));
+].map(([name, description, args]) => ({ name, description, args: [...args, ...(/^timeline\.(add|update)$/.test(name)?['keyEnabled?','keyColor?','keySimilarity?','keyBlend?','keySpill?']:[]), ...(/^caption\.(add|update)$/.test(name)?Object.keys(captionDefaults).map(k=>k+'?'):[]), ...(/^graphics\.(add|update)$/.test(name)?['rotation?', 'shape?', 'mask?', 'repeat?', 'parentId?', 'matteId?', 'stroke?', 'strokeColor?', 'fillOpacity?', 'sides?', 'innerRadius?', 'gradient?', 'gradientColor?', 'gradientAngle?', 'strokeStart?', 'strokeEnd?', 'strokeAnimation?', 'copies?', 'copyX?', 'copyY?', 'copyRotation?', 'copyOpacity?', 'radius?', 'shadow?', 'glow?', 'wiggle?', 'frequency?', 'tracking?', 'fontWeight?', 'textColor?']:[])] }));
 
 export function emptyState(name = '新しいプロジェクト', settings = {}) {
-  return { id: uid('project'), name, fps: 30, width: 1920, height: 1080, updatedAt: now(), storyboard: [], assets: [], clips: [], captions: [], graphics: [], markers: [], decisions: [], jobs: [], settings: { comfyUrl: 'http://127.0.0.1:8188', vidsUrl: '', codexModel: '', ...settings } };
+  return { id: uid('project'), name, fps: 30, width: 1920, height: 1080, updatedAt: now(), audioMixer:mixerSettings(), storyboard: [], assets: [], clips: [], captions: [], graphics: [], markers: [], decisions: [], jobs: [], settings: { comfyUrl: 'http://127.0.0.1:8188', vidsUrl: '', codexModel: '', ...settings } };
 }
 
 function requiredTracks(value = ['video', 'audio']) {
@@ -166,6 +169,7 @@ async function openProject(input, current, dataDir) {
   }
   if (imported.jobs !== undefined && (!Array.isArray(imported.jobs) || imported.jobs.length > 10000 || new Set(imported.jobs.map((job) => job?.id)).size !== imported.jobs.length)) throw new AppError('プロジェクトの jobs が不正です。');
   const restored = emptyState(textValue(imported.name, 'プロジェクト名', { max: 200 }), current.settings);
+  restored.audioMixer=mixerSettings(imported.audioMixer);
   restored.fps = numberValue(imported.fps, 'fps', { min: 1, max: 120 });
   restored.width = numberValue(imported.width, 'width', { min: 16, max: 8192 });
   restored.height = numberValue(imported.height, 'height', { min: 16, max: 8192 });
@@ -254,7 +258,8 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
     if (error.code !== 'ENOENT') throw new AppError(`保存プロジェクトを読み込めません: ${error.message}`, 500);
     state = emptyState(); await atomicJson(statePath, state);
   }
-  let migrated = false;
+  let migrated = !state.audioMixer;
+  state.audioMixer=mixerSettings(state.audioMixer);
   for (const field of ['captions', 'graphics', 'markers']) {
     if (state[field] === undefined) { state[field] = []; migrated = true; }
     else if (!Array.isArray(state[field])) throw new AppError(`保存プロジェクトの ${field} が不正です。`, 500);
@@ -270,8 +275,8 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
   const undo=[], redo=[];
   const historySizes=new WeakMap();
   const historySize=value=>{if(!historySizes.has(value))historySizes.set(value,JSON.stringify(value).length*2);return historySizes.get(value);};
-  const historyFields=['name','width','height','fps','storyboard','clips','captions','graphics','markers'];
-  const editSnapshot=value=>Object.fromEntries(historyFields.map(key=>[key,structuredClone(value[key] ?? [])]));
+  const historyFields=['name','width','height','fps','storyboard','clips','captions','graphics','markers','audioMixer'];
+  const editSnapshot=value=>Object.fromEntries(historyFields.map(key=>[key,structuredClone(value[key] ?? (key==='audioMixer'?mixerSettings():[]))]));
   const remember=value=>{undo.push(value);redo.length=0;while(undo.length>50||undo.reduce((total,item)=>total+historySize(item),0)>8*1024*1024)undo.shift();};
   const listeners = new Set();
   const snapshot = () => structuredClone(state);
@@ -287,7 +292,7 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
       await atomicJson(statePath, draft); state = draft;
       if(command==='edit.undo'){redo.push(before);undo.pop();}
       else if(command==='edit.redo'){undo.push(before);redo.pop();}
-      else if(/^(timeline|caption|graphics|marker|storyboard)\.|^project\.(rename|settings)$/.test(command))remember(before);
+      else if(/^(timeline|caption|graphics|marker|storyboard|audio|sfx)\.|^project\.(rename|settings)$/.test(command))remember(before);
       else {undo.length=0;redo.length=0;}
       const output = snapshot();
       for (const listener of listeners) { try { listener(output); } catch { /* SSE disconnect must not undo durable state. */ } }
@@ -337,7 +342,7 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
       }
       case 'project.switch': {
         const replacement=await library.load(args.id);
-        replacement.markers??=[];
+        replacement.markers??=[];replacement.audioMixer=mixerSettings(replacement.audioMixer);
          for(const key of ['assets','clips','storyboard','captions','graphics','jobs','decisions'])if(!Array.isArray(replacement[key]))throw new AppError('保存プロジェクトが不正です。');
         for(const asset of replacement.assets)await confinedFile(path.join(dataDir,'assets'),asset.path);
         for(const clip of replacement.clips)validateClip(replacement,clip);
@@ -396,6 +401,23 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
         draft.storyboard = rawScenes.map((scene, index) => makeScene(scene, index));
         draft.assets.forEach((asset) => { asset.sceneId = null; }); draft.jobs.forEach((job) => { job.sceneId = null; });
         return { mode, scenes: draft.storyboard, duration: seconds(draft.storyboard.reduce((sum, scene) => sum + scene.duration, 0)), note: mode === 'local' ? '尺を分割したローカル雛形です。AIによる企画・台本生成ではありません。各シーンを編集してください。' : 'Codex App Serverで編集点を計画しました。各シーンを確認してください。' };
+      }
+      case 'audio.track.update': {
+        const lane=clipControls({lane:args.lane}).lane;if(args.lane===undefined)throw new AppError('lane is required');
+        draft.audioMixer=mixerSettings(draft.audioMixer);draft.audioMixer.tracks[lane]=trackSettings({...draft.audioMixer.tracks[lane],...args});return draft.audioMixer;
+      }
+      case 'audio.master.update': {if(args.masterDb===undefined)throw new AppError('masterDb is required');draft.audioMixer=mixerSettings({...mixerSettings(draft.audioMixer),masterDb:args.masterDb});return draft.audioMixer;}
+      case 'sfx.create': {
+        if(draft.assets.length>=5000||draft.clips.length>=20000)throw new AppError('素材・クリップ数の上限です。');
+        const duration=numberValue(args.duration,'duration',{min:.1,max:8,fallback:1}),start=Math.round(numberValue(args.start,'start',{max:86400-duration,fallback:0})*draft.fps)/draft.fps;
+        const options={...args,duration:Math.ceil(duration*draft.fps)/draft.fps};
+        const wav=soundWav(options);
+        const free=lane=>!draft.clips.some(c=>c.track==='audio'&&(c.lane||0)===lane&&c.start<start+options.duration&&c.start+c.duration>start);
+        const lane=args.lane===undefined?Array.from({length:8},(_,i)=>i).find(free):clipControls({lane:args.lane}).lane;
+        if(lane===undefined||!free(lane))throw new AppError('空き音声トラックがありません。配置位置を変更してください。');
+        const source=path.join(dataDir,'tmp',uid('sfx')+'.wav');await mkdir(path.dirname(source),{recursive:true});await writeFile(source,wav);
+        let asset;try{asset=await importMedia({source,dataDir,originalName:sfxPresets[args.preset||'whoosh']+'.wav'});}finally{await unlink(source).catch(()=>{});}draft.assets.push(asset);
+        const clip=makeClip(draft,{assetId:asset.id,track:'audio',lane,start,duration:options.duration});draft.clips.push(clip);return {asset,clip};
       }
       case 'asset.import': {
         const asset = await importMedia({ source: args.path, dataDir, sceneId: sceneIdValue(draft, args.sceneId) }); draft.assets.push(asset); return asset;
