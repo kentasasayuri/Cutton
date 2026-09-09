@@ -155,12 +155,13 @@ async function render(state,folder) {
     const standard=state.graphics?.some(g=>!['vector','null'].includes(g.type));
     const composite=vectors||captions||standard;
     await renderSegments(state,folder,scratch,composite);
-    if(vectors)await renderVectorPass(state,folder,{crf:standard||captions?0:18});
+    const combined=vectors&&captions&&!standard;
+    if(vectors)await renderVectorPass(state,folder,{combined,crf:combined?18:standard||captions?0:18});
     if(standard){
       const filter=await prepareOverlayFilter(legacy,scratch);
       if(filter){const temporary=path.join(folder,'title-composite.mp4');await runFfmpeg(['-i',path.join(folder,'movie.mp4'),'-vf',filter,'-c:v','libx264','-crf',captions?'0':'18','-preset','veryfast','-threads',encodeThreads(state.width,state.height),'-c:a','copy','-movflags','+faststart',temporary],{cwd:scratch});await fs.rename(temporary,path.join(folder,'movie.mp4'));}
     }
-    if(captions)await renderVectorPass(state,folder,{captions:true,crf:18});
+    if(captions&&!combined)await renderVectorPass(state,folder,{captions:true,crf:18});
   }
   finally { await fs.rm(scratch,{recursive:true,force:true}); }
 }

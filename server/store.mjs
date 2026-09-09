@@ -1,4 +1,7 @@
 import {alignItems,cutRanges} from './timing-edits.mjs';
+import {captionIssues,mergeCaptions,splitCaption,applyCaptionLook} from './caption-editing.mjs';
+import {backgroundAsset,bgmOptions,prepareBgm} from './finishing.mjs';
+import {motionLayout} from './motion-layouts.mjs';
 import {mixerSettings,trackSettings} from './audio-mixer.mjs';
 import {soundWav,sfxPresets} from './sfx.mjs';
 import {captionDefaults} from './caption-style.mjs';
@@ -18,6 +21,10 @@ import { projectLibrary } from './project-library.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EPSILON = 0.000001;
 export const COMMANDS = [
+  ['graphics.layout','比較・段階表示の編集可能なモーションを一括追加',['preset','texts','start?','duration?','y?','fontSize?']],
+  ['caption.check','字幕の語尾・表示時間・重なりを確認',[]], ['caption.merge','隣り合う字幕を時刻付きで結合',['ids']], ['caption.split','文字位置で字幕を分割',['id','index','at?']], ['caption.look','字幕の読みやすさ・強調スタイルを適用',['ids','preset']],
+  ['background.apply','背景を追加・差し替え、指定映像の余白を透過',['preset','replaceClipId?','foregroundLane?','top?','bottom?','left?','right?']],
+  ['audio.prepareBgm','BGMを尺に合わせ、声に連動する音量で別素材へ保存',['assetId','duration?','voiceLane?','lane?','ducking?','level?','fadeIn?','fadeOut?']],
   ['audio.track.update','トラックの音量・バランス・ミュート・ソロ・EQを設定',['lane','volumeDb?','balance?','mute?','solo?','lowDb?','midDb?','highDb?','lowHz?','midHz?','highHz?','midQ?','highpass?','highpassHz?','lowpass?','lowpassHz?']], ['audio.master.update','マスター音量を設定',['masterDb']], ['sfx.create','内蔵効果音を作成して空き音声トラックに配置',['preset?','duration?','frequency?','levelDb?','seed?','start?','lane?']],
   ['timeline.align','選択要素をまとめて揃える',['items','mode?','at?','gap?']], ['timeline.cutRanges','全トラックから範囲を除去して字幕・マーカーも詰める',['ranges']], ['timeline.splitAll','全映像・音声を再生位置で分割',['at']],
   ['edit.undo','編集を戻す',[]], ['edit.redo','編集をやり直す',[]], ['timeline.rippleRemove','削除して同じトラックの後続を詰める',['id']], ['timeline.closeGaps','同じトラックの空白を詰める',['track?','lane?']], ['timeline.slip','配置を保持して素材の使用範囲をずらす',['id','offset']], ['marker.add','マーカーを追加',['time','name?']], ['marker.remove','マーカーを削除',['id']],
@@ -294,7 +301,7 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
       await atomicJson(statePath, draft); state = draft;
       if(command==='edit.undo'){redo.push(before);undo.pop();}
       else if(command==='edit.redo'){undo.push(before);redo.pop();}
-      else if(/^(timeline|caption|graphics|marker|storyboard|audio|sfx)\.|^project\.(rename|settings)$/.test(command))remember(before);
+      else if(/^(timeline|caption|graphics|marker|storyboard|audio|sfx|background)\.|^project\.(rename|settings)$/.test(command))remember(before);
       else {undo.length=0;redo.length=0;}
       const output = snapshot();
       for (const listener of listeners) { try { listener(output); } catch { /* SSE disconnect must not undo durable state. */ } }
@@ -319,6 +326,33 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
   const executeMutation = (command, args = {}) => transact(async (draft) => {
     textValue(command, 'command', { max: 100 }); object(args);
     switch (command) {
+      case 'graphics.layout': {const items=motionLayout(args).map(item=>createOverlay('graphics',item));if(draft.graphics.length+items.length>5000)throw new AppError('グラフィックは5000個以内です。');draft.graphics.push(...items);return {items};}
+      case 'caption.merge': return mergeCaptions(draft,args.ids);
+      case 'caption.split': {if(draft.captions.length>=5000)throw new AppError('字幕は5000個以内です。');return splitCaption(draft,args);}
+      case 'caption.look': return applyCaptionLook(draft,args);
+      case 'background.apply': {
+        if(draft.assets.length>=5000||draft.clips.length>=20000)throw new AppError('素材・クリップ数の上限です。');
+        const replacement=args.replaceClipId?requireItem(draft.clips,args.replaceClipId,'差し替える背景'):null;
+        if(replacement&&(replacement.track!=='video'||requireItem(draft.assets,replacement.assetId,'背景素材').kind!=='image'))throw new AppError('差し替える背景には画像クリップを選択してください。');
+        const videos=draft.clips.filter(c=>c.track==='video');
+        if(!replacement&&videos.some(c=>(c.lane||0)>=7))throw new AppError('背景用にV1を空けるには、上の映像トラックを1つ空けてください。');
+        const foregroundLane=args.foregroundLane===undefined?null:numberValue(args.foregroundLane,'前景トラック',{max:7});if(foregroundLane!==null&&!Number.isInteger(foregroundLane))throw new AppError('トラックが不正です。');
+        const foreground=videos.filter(c=>c.id!==replacement?.id&&(c.lane||0)===foregroundLane);
+        const crop={};for(const [key,field] of [['top','cropTop'],['bottom','cropBottom'],['left','cropLeft'],['right','cropRight']])if(args[key]!==undefined)crop[field]=numberValue(args[key],key,{max:90});
+        if(Object.keys(crop).length&&!foreground.length)throw new AppError('余白を透過する映像トラックを選択してください。');
+        foreground.forEach(c=>clipControls({...c,...crop}));
+        const duration=Math.max(0,...[...draft.clips,...draft.captions,...draft.graphics].map(c=>c.start+c.duration));if(!duration)throw new AppError('先に映像を配置してください。');
+        const asset=await backgroundAsset(draft,args,dataDir);draft.assets.push(asset);
+        if(replacement){replacement.assetId=asset.id;replacement.muted=false;replacement.in=0;}
+        else{videos.forEach(c=>c.lane=(c.lane||0)+1);draft.clips.push(makeClip(draft,{assetId:asset.id,track:'video',lane:0,start:0,duration}));}
+        foreground.forEach(c=>Object.assign(c,crop));for(const c of draft.clips)validateClip(draft,c);return {assetId:asset.id,clipId:replacement?.id||draft.clips.at(-1).id};
+      }
+      case 'audio.prepareBgm': {
+        if(draft.assets.length>=5000||draft.clips.length>=20000)throw new AppError('素材・クリップ数の上限です。');
+        const options=bgmOptions(draft,args),lane=args.lane===undefined?Array.from({length:8},(_,i)=>i).find(i=>i!==options.voiceLane&&!draft.clips.some(c=>c.track==='audio'&&(c.lane||0)===i&&c.start<options.duration)):clipControls({lane:args.lane}).lane;
+        if(lane===undefined||lane===options.voiceLane||draft.clips.some(c=>c.track==='audio'&&(c.lane||0)===lane&&c.start<options.duration))throw new AppError('BGMを置く空き音声トラックがありません。');
+        const asset=await prepareBgm(draft,args,dataDir);draft.assets.push(asset);const clip=makeClip(draft,{assetId:asset.id,track:'audio',lane,start:0,duration:Math.min(options.duration,asset.duration)});draft.clips.push(clip);return {assetId:asset.id,clipId:clip.id,lane,note:asset.provenance.note};
+      }
       case 'edit.undo': case 'edit.redo': {
         const history=command==='edit.undo'?undo:redo;
         if(!history.length)throw new AppError('戻せる編集がありません。');
@@ -623,7 +657,7 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
     const work=exportQueue.then(async()=>{const {source,format}=await prepared;const {exportProject}=await import('../exporters/index.mjs');const result=await exportProject(source,{format,dataDir});return {state:snapshot(),result:{...result,projectId:source.id,projectUpdatedAt:source.updatedAt}};});
     prepared.catch(()=>{});exportQueue=work.catch(()=>{});return work;
   };
-  const execute = (command, args = {}) => command==='image.generate'?startImage(args):command==='export.create'?exportSnapshot(args):command === 'project.list' ? library.list().then(projects=>({state:snapshot(),result:{projects}})) : command === 'asset.waveform' ? (async () => {
+  const execute = (command, args = {}) => command==='caption.check'?Promise.resolve({state:snapshot(),result:{issues:captionIssues(state)}}):command==='image.generate'?startImage(args):command==='export.create'?exportSnapshot(args):command === 'project.list' ? library.list().then(projects=>({state:snapshot(),result:{projects}})) : command === 'asset.waveform' ? (async () => {
     object(args);
     const result = await waveform(args.id);
     return { state: snapshot(), result };

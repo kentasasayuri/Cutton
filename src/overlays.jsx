@@ -1,4 +1,6 @@
 import MotionFields from './motion-fields';
+import {CaptionReview,CaptionBoundaryTools,BackgroundPanel,MotionLayoutPanel} from './finishing-panels';
+import {moveGraphicDraft} from '../server/motion-layouts.mjs';
 import {CaptionFields,CaptionPreview} from './caption-editor';
 import {captionDefaults} from '../server/caption-style.mjs';
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,7 +20,7 @@ function OverlayForm({ item, kind, state, clock, run, busy, onSelect, onNew }) {
   const [presetId,setPresetId]=useState(item?'':graphicPresets[0].id);
   const itemSnapshot = JSON.stringify(item || null);
   useEffect(() => { if (item) setDraft(item); }, [itemSnapshot]);
-  const set = (key, value) => setDraft(previous => ({ ...previous, [key]: value }));
+  const set = (key, value) => setDraft(previous => caption?({ ...previous, [key]: value }):moveGraphicDraft(previous,key,value));
   const numeric = (key, label, options = {}) => <Field label={label}><input type="number" value={draft[key] ?? ''} step={options.step || .1} min={options.min} max={options.max} required data-action={`${caption ? 'caption' : 'graphics'}.${key}`} onChange={event => set(key, event.target.value)} /></Field>;
   const updateFrame = (index, key, value) => set('keyframes', (draft.keyframes || []).map((frame, i) => i === index ? { ...frame, [key]: value } : frame));
   const addFrame = () => {
@@ -39,6 +41,7 @@ function OverlayForm({ item, kind, state, clock, run, busy, onSelect, onNew }) {
     if (saved?.id) onSelect({ type: kind, id: saved.id });
   };
   return <form className="overlay-form" onSubmit={save}>
+    {caption&&item&&<CaptionBoundaryTools key={item.id} item={item} state={state} clock={clock} run={run} busy={busy} onSelect={onSelect}/>}
     <div className="overlay-edit-heading"><h3>{item ? caption ? '字幕を編集' : 'グラフィックを編集' : caption ? '字幕を追加' : 'グラフィックを追加'}</h3>{item && <Button icon={Plus} action={`${kind}.new`} title="新規追加" aria-label="新規追加" onClick={onNew} />}</div>
     {!caption && <Field label="テンプレート"><select value={presetId} data-action="graphics.preset" onChange={event => { const preset = graphicPresets.find(p => p.id === event.target.value); if(!preset)return;setPresetId(preset.id); setDraft(previous => ({ ...previous, ...preset, duration:Math.max(previous.duration||4,4), keyframes: preset.keyframes ? structuredClone(preset.keyframes) : [] })); }}><option value="">カスタム</option>{graphicPresets.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></Field>}
     <Field label="テキスト"><textarea rows="3" value={draft.text} required={caption || !['shape', 'frame', 'vector', 'null'].includes(draft.type)} data-action={`${kind}.text`} onChange={event => setDraft(previous=>({...previous,text:event.target.value,...(caption?{words:[]}: {})}))} placeholder={caption ? '字幕を入力' : 'テキストを入力'} /></Field>
@@ -59,7 +62,8 @@ function OverlayForm({ item, kind, state, clock, run, busy, onSelect, onNew }) {
 export function OverlayEditor({ state, selected, mode, onMode, onSelect, clock, run, busy }) {
   const items = mode === 'caption' ? state.captions || [] : state.graphics || [];
   const item = selected?.type === mode ? items.find(i => i.id === selected.id) : null;
-  return <><div className="overlay-mode-switch"><button className={mode === 'caption' ? 'active' : ''} data-action="overlay.captions" onClick={() => onMode('caption')}>字幕</button><button className={mode === 'graphic' ? 'active' : ''} data-action="overlay.graphics" onClick={() => onMode('graphic')}>グラフィック</button></div><OverlayForm key={`${mode}-${item?.id || 'new'}`} item={item} kind={mode} state={state} clock={clock} run={run} busy={busy} onSelect={onSelect} onNew={() => onSelect(null)} />{items.length > 0 && <div className="overlay-layer-list"><div className="inspector-section-title">レイヤー <span>{items.length}</span></div>{items.map(layer => <button key={layer.id} className={item?.id === layer.id ? 'active' : ''} data-action={`${mode}.select`} data-entity-id={layer.id} onClick={() => onSelect({ type: mode, id: layer.id })}><span>{layer.text || layer.type}</span><small>{timecode(layer.start).slice(3, 8)} · {layer.duration}s</small></button>)}</div>}</>;
+  const helpers=mode==='caption'?<CaptionReview state={state} onSelect={onSelect} clock={clock} run={run} busy={busy}/>:<><BackgroundPanel state={state} run={run} busy={busy}/><MotionLayoutPanel clock={clock} run={run} busy={busy}/></>;
+  return <>{helpers}<div className="overlay-mode-switch"><button className={mode === 'caption' ? 'active' : ''} data-action="overlay.captions" onClick={() => onMode('caption')}>字幕</button><button className={mode === 'graphic' ? 'active' : ''} data-action="overlay.graphics" onClick={() => onMode('graphic')}>グラフィック</button></div><OverlayForm key={`${mode}-${item?.id || 'new'}`} item={item} kind={mode} state={state} clock={clock} run={run} busy={busy} onSelect={onSelect} onNew={() => onSelect(null)} />{items.length > 0 && <div className="overlay-layer-list"><div className="inspector-section-title">レイヤー <span>{items.length}</span></div>{items.map(layer => <button key={layer.id} className={item?.id === layer.id ? 'active' : ''} data-action={`${mode}.select`} data-entity-id={layer.id} onClick={() => onSelect({ type: mode, id: layer.id })}><span>{layer.text || layer.type}</span><small>{timecode(layer.start).slice(3, 8)} · {layer.duration}s</small></button>)}</div>}</>;
 }
 
 export const OverlayPreview = memo(function OverlayPreview({ state, clock, selected, onSelect }) {

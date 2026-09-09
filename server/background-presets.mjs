@@ -1,0 +1,5 @@
+export const backgroundPresets=[{id:'blue',name:'ブルー・エディトリアル',a:'#3a6495',b:'#193954',accent:'#a5d9e0'},{id:'teal',name:'ティール・幾何模様',a:'#286c76',b:'#133e48',accent:'#b5e8db'},{id:'paper',name:'ライト・ペーパー',a:'#e8edf3',b:'#b8c8da',accent:'#516c92'}];
+export function backgroundSvg(preset,width,height){
+ const p=backgroundPresets.find(p=>p.id===preset);if(!p)throw Error('背景を選択してください。');
+ return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 1080 1080" preserveAspectRatio="none"><defs><linearGradient id="b" x2=".9" y2="1"><stop stop-color="${p.a}"/><stop offset="1" stop-color="${p.b}"/></linearGradient></defs><rect width="1080" height="1080" fill="url(#b)"/><path d="M790 -50 L1120 -50 L1120 620 Z M-40 560 L420 1120 L-40 1120 Z" fill="${p.accent}" opacity=".09"/><g fill="none" stroke="${p.accent}" stroke-opacity=".15"><circle cx="1010" cy="20" r="240"/><circle cx="1010" cy="20" r="270"/><circle cx="1010" cy="20" r="300"/><path d="M20 1000 L260 1080 M20 960 L360 1080 M20 920 L460 1080 M54 1007 H1026"/></g></svg>`;
+}
