@@ -57,7 +57,12 @@ export async function atomicJson(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  await rename(temporary, filePath);
+  // Windows readers and virus scanners can briefly hold a replace-denying handle.
+  // Keep the existing project intact and retry the same atomic replacement.
+  for(let attempt=0;;attempt++){
+    try{await rename(temporary,filePath);break;}
+    catch(error){if(process.platform!=='win32'||!['EPERM','EBUSY','EACCES'].includes(error.code)||attempt>=5)throw error;await new Promise(resolve=>setTimeout(resolve,25*2**attempt));}
+  }
 }
 export function safeFilename(name, fallback = 'media') {
   return (String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 160) || fallback);
