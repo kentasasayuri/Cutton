@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createOverlay, updateOverlay, evaluateOverlayTransform, wrapOverlayText, escapeAssText, toAss, toCaptionsSrt, GRAPHIC_TYPES } from '../server/overlays.mjs';
 import { exportProject, hashFile, toOtio } from '../exporters/index.mjs';
+import { captionDefaults } from '../server/caption-style.mjs';
 
 const exec = promisify(execFile);
 const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
@@ -14,7 +15,7 @@ const fixture = () => ({ id: 'overlay-project', name: "日本語 overlay's test"
 
 test('overlay defaults, whitelist, immutable update and validation', () => {
   const caption = createOverlay('caption', { text: '日本語\r\n字幕', extra: 'discard me' }, 'cap_1');
-  assert.deepEqual(caption, { id: 'cap_1', text: '日本語\n字幕', start: 0, duration: 3, x: 50, y: 88, fontSize: 48, color: '#ffffff' });
+  assert.deepEqual(caption, { id: 'cap_1', text: '日本語\n字幕', start: 0, duration: 3, x: 50, y: 88, fontSize: 48, color: '#ffffff', ...captionDefaults });
   const updated = updateOverlay('caption', caption, { id: 'replace', start: 2, color: '#ABCDEF' });
   assert.equal(updated.id, 'cap_1'); assert.equal(updated.start, 2); assert.equal(updated.color, '#abcdef'); assert.equal(caption.start, 0);
   for (const type of GRAPHIC_TYPES) assert.equal(createOverlay('graphics', { type, text: 'Design' }).type, type);

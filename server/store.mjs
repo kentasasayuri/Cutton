@@ -1,3 +1,5 @@
+import {captionDefaults} from './caption-style.mjs';
+import {prepareVidsScript,voiceDirection} from './vids-voices.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile, stat } from 'node:fs/promises';
@@ -25,9 +27,9 @@ export const COMMANDS = [
   ['settings.update', 'ComfyUI / Google Vids / Codex の接続設定', ['comfyUrl?', 'vidsUrl?', 'codexModel?']], ['integrations.check', 'FFmpeg・Codex・ComfyUIの接続を確認', []],
   ['generation.submit', 'ComfyUI APIワークフローで素材を生成', ['kind', 'prompt', 'sceneId?', 'workflow', 'seed?']], ['generation.refresh', '生成状況を取得し完成素材を取り込む', ['id']],
   ['image.generate','Codexのサブスク枠で画像を生成して素材へ取り込む',['prompt','aspect?','sceneId?']],
-  ['narration.prepare', 'Google Vidsへ渡す台本とプロンプトを作成', ['prompt', 'sceneId?', 'mode?', 'language?', 'voice?']], ['narration.import', 'Vidsの音声またはMP4から音声を取り込む', ['path', 'sceneId?', 'jobId?']],
+  ['narration.prepare', 'Google Vidsへ渡す台本とプロンプトを作成', ['prompt', 'sceneId?', 'mode?', 'language?', 'voice?', 'voiceName?', 'avatarId?', 'delivery?', 'vocalization?', 'direction?']], ['narration.import', 'Vidsの音声またはMP4から音声を取り込む', ['path', 'sceneId?', 'jobId?']],
   ['export.create', 'プロジェクト・編集表・MP4を書き出す', ['format']], ['decisions.export', '採否の判断例をSKILL.mdへ書き出す', []],
-].map(([name, description, args]) => ({ name, description, args }));
+].map(([name, description, args]) => ({ name, description, args: [...args, ...(/^caption\.(add|update)$/.test(name)?Object.keys(captionDefaults).map(k=>k+'?'):[]), ...(/^graphics\.(add|update)$/.test(name)?['shape?', 'mask?', 'repeat?', 'parentId?', 'matteId?', 'stroke?', 'strokeColor?', 'fillOpacity?', 'sides?', 'innerRadius?', 'gradient?', 'gradientColor?', 'gradientAngle?', 'strokeStart?', 'strokeEnd?', 'strokeAnimation?', 'copies?', 'copyX?', 'copyY?', 'copyRotation?', 'copyOpacity?', 'radius?', 'shadow?', 'glow?', 'wiggle?', 'frequency?', 'tracking?', 'fontWeight?', 'textColor?']:[])] }));
 
 export function emptyState(name = '新しいプロジェクト', settings = {}) {
   return { id: uid('project'), name, fps: 30, width: 1920, height: 1080, updatedAt: now(), storyboard: [], assets: [], clips: [], captions: [], graphics: [], markers: [], decisions: [], jobs: [], settings: { comfyUrl: 'http://127.0.0.1:8188', vidsUrl: '', codexModel: '', ...settings } };
@@ -217,6 +219,7 @@ async function openProject(input, current, dataDir) {
       const sourceResult = sourceJob.result || {};
       const mode = choice(sourceResult.mode, ['local', 'codex'], '台本作成モード', 'local');
       job.result = { mode, script: textValue(sourceResult.script, '保存された台本', { max: 60000, empty: true, fallback: '' }), language: textValue(sourceResult.language, '言語', { max: 100, fallback: 'ja-JP' }), voice: textValue(sourceResult.voice, '声の指定', { max: 1000, empty: true, fallback: '' }), vidsUrl: vidsLink(current.settings.vidsUrl), note: '復元されたナレーション履歴です。台本は保持しています。元の環境にあった一時ダウンロードURLは復元しません。', ...(idMap.has(sourceResult.assetId) ? { assetId: idMap.get(sourceResult.assetId) } : {}) };
+      if(sourceResult.voiceName)Object.assign(job.result,prepareVidsScript(job.result.script,sourceResult));
       if (typeof sourceResult.streamIdentical === 'boolean') job.result.streamIdentical = sourceResult.streamIdentical;
     }
     return job;
@@ -509,15 +512,17 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
         const mode = choice(args.mode, ['local', 'codex'], 'mode', 'local');
         const language = textValue(args.language, '言語', { max: 100, fallback: 'ja-JP' });
         const voice = textValue(args.voice, '声の指定', { max: 1000, empty: true, fallback: '自然で落ち着いたナレーション' });
+        const acting=voiceDirection(args);
         let script = prompt;
-        if (mode === 'codex') { const { generateNarration } = await import('./codex.mjs'); script = await generateNarration({ prompt, language, voice, model: draft.settings.codexModel, cwd: dataDir }); textValue(script, '生成された台本', { max: 60000 }); }
+        if (mode === 'codex') { const { generateNarration } = await import('./codex.mjs'); script = await generateNarration({ prompt, language, voice:voice+'\n'+acting.stylePrompt, model: draft.settings.codexModel, cwd: dataDir }); textValue(script, '生成された台本', { max: 60000 }); }
+        const prepared=prepareVidsScript(script,args);
         const id = uid('job');
         const folder = path.join(dataDir, 'exports', `narration-${id}`); await mkdir(folder, { recursive: true });
         const outputPath = path.join(folder, 'google-vids-handoff.json'), textPath = path.join(folder, 'narration.txt');
         const note = mode === 'local' ? '入力された台本をそのまま保存しました。音声は未生成です。Google Vidsで生成後、音声またはMP4を取り込んでください。' : 'Codexで台本を作成しました。音声は未生成です。Google Vidsで生成後、音声またはMP4を取り込んでください。';
-        const result = { script, path: outputPath, url: `/api/download?path=${encodeURIComponent(path.relative(path.join(dataDir, 'exports'), outputPath).split(path.sep).join('/'))}`, textPath, textUrl: `/api/download?path=${encodeURIComponent(path.relative(path.join(dataDir, 'exports'), textPath).split(path.sep).join('/'))}`, vidsUrl: vidsLink(draft.settings.vidsUrl), mode, language, voice, note };
-        await atomicJson(outputPath, { app: 'Cutton', version: 1, projectId: draft.id, sceneId, jobId: id, prompt, script, language, voice, vidsUrl: result.vidsUrl, status: 'awaiting_import', instructions: ['Google Vidsを開いて台本を音声生成機能へ貼り付けてください。', '声と話速を選び、音声を生成してください。', '完成した動画をMP4としてダウンロードし、Cuttonの「Vids音声を取り込む」から取り込んでください。'], createdAt: now() });
-        await writeFile(textPath, script, 'utf8');
+        const result = { script, ...prepared, path: outputPath, url: `/api/download?path=${encodeURIComponent(path.relative(path.join(dataDir, 'exports'), outputPath).split(path.sep).join('/'))}`, textPath, textUrl: `/api/download?path=${encodeURIComponent(path.relative(path.join(dataDir, 'exports'), textPath).split(path.sep).join('/'))}`, vidsUrl: vidsLink(draft.settings.vidsUrl), mode, language, voice, note };
+        await atomicJson(outputPath, { app: 'Cutton', version: 1, projectId: draft.id, sceneId, jobId: id, prompt, script, ...prepared, language, voice, vidsUrl: result.vidsUrl, status: 'awaiting_import', instructions: prepared.instructions, createdAt: now() });
+        await writeFile(textPath, prepared.taggedScript, 'utf8');
         const job = { id, type: 'narration', status: 'awaiting_import', prompt, sceneId, createdAt: now(), result }; draft.jobs.push(job);
         return { ...result, jobId: id, status: job.status };
       }

@@ -1,3 +1,4 @@
+import {encodeThreads} from '../server/performance.mjs';
 import {toFcpxml} from './fcpxml.mjs';
 import fs from 'node:fs/promises';
 import { renderVectorPass } from './vector-render.mjs';
@@ -149,15 +150,17 @@ async function render(state,folder) {
   if(path.dirname(scratch)!==path.resolve(folder)) throw new Error('Invalid render directory');
   await fs.mkdir(scratch);
   try {
-    const vectors=state.graphics?.some(g=>g.type==='vector');
-    await renderSegments(state,folder,scratch,vectors);
-    await renderVectorPass(state,folder);
-    // The preview puts standard titles and captions above vector compositions.
-    // Apply that same order here, so a full-frame vector cannot hide subtitles.
-    if(vectors){
-      const filter=await prepareOverlayFilter(state,scratch);
-      if(filter){const temporary=path.join(folder,'caption-composite.mp4');await runFfmpeg(['-i',path.join(folder,'movie.mp4'),'-vf',filter,'-c:v','libx264','-crf','18','-preset','veryfast','-threads','1','-c:a','copy','-movflags','+faststart',temporary],{cwd:scratch});await fs.rename(temporary,path.join(folder,'movie.mp4'));}
+    const vectors=state.graphics?.some(g=>g.type==='vector'),captions=Boolean(state.captions?.length);
+    const legacy={...state,captions:[]};
+    const standard=state.graphics?.some(g=>!['vector','null'].includes(g.type));
+    const composite=vectors||captions||standard;
+    await renderSegments(state,folder,scratch,composite);
+    if(vectors)await renderVectorPass(state,folder,{crf:standard||captions?0:18});
+    if(standard){
+      const filter=await prepareOverlayFilter(legacy,scratch);
+      if(filter){const temporary=path.join(folder,'title-composite.mp4');await runFfmpeg(['-i',path.join(folder,'movie.mp4'),'-vf',filter,'-c:v','libx264','-crf',captions?'0':'18','-preset','veryfast','-threads',encodeThreads(state.width,state.height),'-c:a','copy','-movflags','+faststart',temporary],{cwd:scratch});await fs.rename(temporary,path.join(folder,'movie.mp4'));}
     }
+    if(captions)await renderVectorPass(state,folder,{captions:true,crf:18});
   }
   finally { await fs.rm(scratch,{recursive:true,force:true}); }
 }
@@ -168,8 +171,8 @@ async function renderSegments(state,folder,scratch,deferOverlays=false) {
   const fps=state.fps; const w=state.width; const h=state.height;
   const overlayFilter=deferOverlays?null:await prepareOverlayFilter(state,scratch);
   if(needsLayerRender(state)) {
-    const layers=await renderLayers(state,scratch,runFfmpeg);
-    await runFfmpeg(['-i',layers.path,...(overlayFilter?['-vf',overlayFilter,'-c:v','libx264','-crf','18','-preset','veryfast','-threads','1']:['-c:v','copy']),'-c:a','aac','-b:a','192k','-t',String(layers.total),'-movflags','+faststart',path.join(folder,'movie.mp4')],{cwd:scratch});
+    const layers=await renderLayers(state,scratch,runFfmpeg,{lossless:deferOverlays});
+    await runFfmpeg(['-i',layers.path,...(overlayFilter?['-vf',overlayFilter,'-c:v','libx264','-crf',deferOverlays?'0':'18','-preset','veryfast','-threads',encodeThreads(state.width,state.height)]:['-c:v','copy']),'-c:a','aac','-b:a','192k','-t',String(layers.total),'-movflags','+faststart',path.join(folder,'movie.mp4')],{cwd:scratch});
     return;
   }
   const vclips=state.clips.filter(c=>c.track==='video'&&!c.muted).sort(byTime);
@@ -180,14 +183,14 @@ async function renderSegments(state,folder,scratch,deferOverlays=false) {
     const target=path.join(scratch,name);
     const a=clip?assetFor(state,clip):null;
     const input=a?(a.kind==='image'?['-loop','1','-framerate',String(fps),'-i',a.path]:['-ss',String(clip.in),'-i',a.path]):['-f','lavfi','-i',`color=c=black:s=${w}x${h}:r=${fps}`];
-    await runFfmpeg([...input,'-t',String(duration),'-an','-vf',`scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p`,'-c:v','libx264','-preset','veryfast','-crf','18','-threads','1',target]);
+    await runFfmpeg([...input,'-t',String(duration),'-an','-vf',`scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p`,'-c:v','libx264','-preset','veryfast','-crf',deferOverlays?'0':'18','-threads',encodeThreads(state.width,state.height),target]);
     vsegments.push(name);
   }
   for(const c of vclips) { if(c.start>cursor) await videoSegment(c.start-cursor); await videoSegment(c.duration,c); cursor=c.start+c.duration; }
   if(total>cursor) await videoSegment(total-cursor);
   await fs.writeFile(path.join(scratch,'video.ffconcat'),'ffconcat version 1.0\n'+vsegments.map(n=>`file '${n}'`).join('\n'));
   await runFfmpeg(['-f','concat','-safe','0','-i',path.join(scratch,'video.ffconcat'),'-c','copy',path.join(scratch,'video.mp4')]);
-  const videoEncoding=overlayFilter?['-vf',overlayFilter,'-c:v','libx264','-preset','veryfast','-crf','18','-threads','1','-pix_fmt','yuv420p']:['-c:v','copy'];
+  const videoEncoding=overlayFilter?['-vf',overlayFilter,'-c:v','libx264','-preset','veryfast','-crf',deferOverlays?'0':'18','-threads',encodeThreads(state.width,state.height),'-pix_fmt','yuv420p']:['-c:v','copy'];
   const aclips=state.clips.filter(c=>c.track==='audio'&&!c.muted).sort(byTime);
   if(!aclips.length) {
     if(overlayFilter) await runFfmpeg(['-i',path.join(scratch,'video.mp4'),'-an',...videoEncoding,'-movflags','+faststart',path.join(folder,'movie.mp4')],{cwd:scratch});

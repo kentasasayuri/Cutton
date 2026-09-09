@@ -349,7 +349,7 @@ export function createCodexBridge({ spawn = nodeSpawn, resolveCommand = resolveC
     async generateNarration({ prompt, language = 'ja-JP', voice = '', model, cwd } = {}) {
       const brief = boundedText(prompt, 'プロンプト', 20000);
       const locale = boundedText(language, '言語', 60);
-      const tone = boundedText(voice, '話し方', 300, true);
+      const tone = boundedText(voice, '話し方', 4000, true);
       const object = await run({ model, cwd, schema: narrationSchema, input:
         'Google Vids に貼り付ける読み上げ台本を作成してください。台本だけを script に入れてください。'
         + '1〜2500文字の自然な文章。見出し、箇条書き、絵文字、話者ラベル、Markdownは不要です。'

@@ -1,3 +1,4 @@
+import {PERFORMANCE} from './performance.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -54,7 +55,7 @@ export function createProxyManager({dataDir,getState}) {
         const child=spawn(process.env.FFMPEG_PATH||'ffmpeg',[
           '-hide_banner','-loglevel','error','-nostdin','-y','-threads','1','-i',job.asset.path,
           '-map','0:v:0','-an','-sn','-dn','-vf',`scale=-2:max(2\\,trunc(min(${job.height}\\,ih)/2)*2),fps=30,format=yuv420p`,
-          '-c:v','libx264','-preset','ultrafast','-crf','27','-threads','1','-filter_threads','1',
+          '-c:v','libx264','-preset','ultrafast','-crf','27','-threads',String(PERFORMANCE.previewThreads),'-filter_threads','1',
           '-movflags','+faststart',temporary
         ],{windowsHide:true,stdio:['ignore','ignore','pipe'],env:{...process.env,OMP_NUM_THREADS:'1'}});
         job.child=child;let errorText='';

@@ -1,3 +1,4 @@
+import {encodeThreads,PERFORMANCE} from '../server/performance.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { EFFECT_DEFAULTS } from '../server/clip-effects.mjs';
@@ -6,7 +7,7 @@ export const needsLayerRender = state => state.clips.some(c => c.lane>0 || (c.sp
 const n=v=>Number(v.toFixed(7));
 // Split at edit boundaries. Only the sources visible in this segment are decoded;
 // no full-project frame buffer, and every FFmpeg encoder/filter uses one thread.
-export async function renderLayers(state, scratch, run) {
+export async function renderLayers(state, scratch, run, {lossless=false}={}) {
   const {width:w,height:h,fps}=state;
   const total=Math.ceil(Math.max(0,...[...state.clips,...(state.captions||[]),...(state.graphics||[])].map(c=>c.start+c.duration))*fps-1e-7)/fps;
   if(!total)throw new Error('タイムラインが空です。');
@@ -40,7 +41,7 @@ export async function renderLayers(state, scratch, run) {
     filters.push(`[${last}]trim=duration=${duration},format=yuv420p[vfinal]`);
     filters.push(`[silence]${audio.join('')}amix=inputs=${audio.length+1}:normalize=0:duration=first,alimiter=limit=0.98:level=0:latency=1[afinal]`);
     const file=`layer-${String(i).padStart(5,'0')}.mkv`;
-    await run([...inputs,'-filter_complex_threads','1','-filter_complex',filters.join(';'),'-map','[vfinal]','-map','[afinal]','-t',String(duration),'-c:v','libx264','-preset','veryfast','-crf','18','-threads','1','-c:a','pcm_s16le',path.join(scratch,file)]);
+    await run([...inputs,'-filter_complex_threads',String(PERFORMANCE.filterThreads),'-filter_complex',filters.join(';'),'-map','[vfinal]','-map','[afinal]','-t',String(duration),'-c:v','libx264','-preset','veryfast','-crf',lossless?'0':'18','-threads',encodeThreads(state.width,state.height),'-c:a','pcm_s16le',path.join(scratch,file)]);
     files.push(file);
   }
   await fs.writeFile(path.join(scratch,'layers.ffconcat'),'ffconcat version 1.0\n'+files.map(f=>`file '${f}'`).join('\n'));

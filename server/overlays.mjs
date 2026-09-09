@@ -1,3 +1,4 @@
+import {captionStyle} from './caption-style.mjs';
 // Shared with the preview: keep this module free of Node-only imports.
 export const GRAPHIC_TYPES = ['title', 'lower-third', 'shape', 'kinetic', 'callout', 'frame', 'vector', 'null'];
 const ANIMATIONS = ['fade', 'slide-up', 'none'];
@@ -45,12 +46,16 @@ export function createOverlay(kind, args = {}, id) {
     color: color(args.color, kind === 'caption' ? '#ffffff' : '#63c9cf'),
   };
   if (typeof result.id !== 'string' || !result.id || result.id.length > 200) throw new Error('Invalid overlay id');
+  if(kind==='caption')Object.assign(result,captionStyle(args,duration,result.text));
   if (kind === 'graphics') {
     if(['vector','null'].includes(type)){
-      result.shape=choice(args.shape,'rect',['rect','ellipse','line','text'],'shape');
+      result.shape=choice(args.shape,'rect',['rect','ellipse','line','text','polygon','star'],'shape');
       result.mask=choice(args.mask,'none',['none','rect','ellipse'],'mask');
       result.repeat=choice(args.repeat,'none',['none','loop','pingpong'],'repeat');
-      for(const [key,min,max,fallback] of [['stroke',0,100,0],['radius',0,500,0],['shadow',0,60,0],['glow',0,60,0],['tracking',-20,100,0],['fontWeight',100,900,700],['wiggle',0,20,0],['frequency',.1,20,1]])result[key]=number(args[key],fallback,key,min,max);
+      for(const [key,min,max,fallback] of [['stroke',0,100,0],['radius',0,500,0],['shadow',0,60,0],['glow',0,60,0],['tracking',-20,100,0],['fontWeight',100,900,700],['wiggle',0,20,0],['frequency',.1,20,1],['fillOpacity',0,1,1],['sides',3,16,5],['innerRadius',5,95,45],['gradientAngle',-360,360,45],['strokeStart',0,100,0],['strokeEnd',0,100,100],['copies',1,20,1],['copyX',-100,100,5],['copyY',-100,100,0],['copyRotation',-360,360,0],['copyOpacity',0,1,1]])result[key]=number(args[key],fallback,key,min,max);
+      for(const key of ['sides','copies'])if(!Number.isInteger(result[key]))throw new Error(key+' must be an integer');
+      if(result.strokeEnd<result.strokeStart)throw new Error('線の終点は始点以降にしてください。');
+      result.strokeAnimation=choice(args.strokeAnimation,'none',['none','draw','erase'],'strokeAnimation');
       for(const [key,fallback] of [['strokeColor','#ffffff'],['textColor','#ffffff'],['gradientColor','#182a58']])result[key]=color(args[key],fallback);
       if(args.gradient!==undefined&&typeof args.gradient!=='boolean')throw new Error('gradient must be boolean');result.gradient=args.gradient??false;
       for(const key of ['parentId','matteId']){if(args[key]!=null&&(typeof args[key]!=='string'||args[key].length>200))throw new Error('Invalid layer reference');result[key]=args[key]||null;}
