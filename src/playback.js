@@ -9,6 +9,7 @@ export function syncMediaElement({ element, clip, asset, clock, explicitSeek, si
   element.style.visibility = 'visible';
   const target = Math.max(0, clip.in + (clock.time - clip.start) * (clip.speed ?? 1));
   element.playbackRate=clip.speed??1;
+  element.preservesPitch=true;
   const threshold = !clock.playing || explicitSeek ? .0005 : .16;
   if (Number.isFinite(target) && Math.abs(element.currentTime - target) > threshold) element.currentTime = target;
   element.muted = silent;

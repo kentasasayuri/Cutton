@@ -1,3 +1,5 @@
+import {processAudio} from './audio-processing.mjs';
+import {batchEdit} from './batch-editing.mjs';
 import {alignItems,cutRanges} from './timing-edits.mjs';
 import {trimEdit,placeClip,mergeContinuous,layerEdit,syncPoints,crossfade} from './pro-edits.mjs';
 import {createComposition,motionBatch} from './motion-compositions.mjs';
@@ -24,6 +26,8 @@ import { projectLibrary } from './project-library.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EPSILON = 0.000001;
 export const COMMANDS = [
+  ['audio.process','音声のピッチ・ノイズ除去・スタジオ処理を元音声から作成',['ids','options?']],
+  ['timeline.batch','複数要素の速度・複製・削除を一括編集',['items','action','rate?','ripple?','at?']],
   ['timeline.trim','ロール・リップル・スライド・スリップをフレーム単位で調整',['id','mode?','edge?','frames']],
   ['timeline.place','素材を挿入・上書き・上のトラックへ配置',['assetId','mode?','track?','lane?','start?','in?','duration?']],
   ['timeline.merge','同一素材の連続カットを結合',['ids']],['timeline.layers','選択クリップのレイヤー上下・表示を変更',['ids','action']],
@@ -35,7 +39,7 @@ export const COMMANDS = [
   ['graphics.batch','動きの反転・時間差・入退場を保った尺変更・重なり順',['ids','action','duration?','protect?','gap?']],
   ['graphics.layout','比較・段階表示の編集可能なモーションを一括追加',['preset','texts','start?','duration?','y?','fontSize?']],
   ['caption.check','字幕の語尾・表示時間・重なりを確認',[]], ['caption.merge','隣り合う字幕を時刻付きで結合',['ids']], ['caption.split','文字位置で字幕を分割',['id','index','at?']], ['caption.look','字幕の読みやすさ・強調スタイルを適用',['ids','preset']],
-  ['background.apply','背景を追加・差し替え、指定映像の余白を透過',['preset','replaceClipId?','foregroundLane?','top?','bottom?','left?','right?']],
+  ['background.apply','背景を追加・差し替え、指定映像の余白を透過',['preset','options?','replaceClipId?','foregroundLane?','top?','bottom?','left?','right?']],
   ['audio.prepareBgm','BGMを尺に合わせ、声に連動する音量で別素材へ保存',['assetId','duration?','voiceLane?','lane?','ducking?','level?','fadeIn?','fadeOut?']],
   ['audio.track.update','トラックの音量・バランス・ミュート・ソロ・EQを設定',['lane','volumeDb?','balance?','mute?','solo?','lowDb?','midDb?','highDb?','lowHz?','midHz?','highHz?','midQ?','highpass?','highpassHz?','lowpass?','lowpassHz?','compressor?','thresholdDb?','ratio?','kneeDb?','attackMs?','releaseMs?','makeupDb?']], ['audio.master.update','マスター音量を設定',['masterDb']], ['sfx.create','内蔵効果音を作成して空き音声トラックに配置',['preset?','duration?','frequency?','levelDb?','seed?','start?','lane?']],
   ['timeline.align','選択要素をまとめて揃える',['items','mode?','at?','gap?']], ['timeline.cutRanges','全トラックから範囲を除去して字幕・マーカーも詰める',['ranges']], ['timeline.splitAll','全映像・音声を再生位置で分割',['at']],
@@ -252,7 +256,7 @@ async function openProject(input, current, dataDir) {
   for (const sourceAsset of imported.assets) {
     if (!sourceAsset.provenance) continue;
     const sourceProvenance = object(sourceAsset.provenance, '素材の生成履歴');
-    if(['cutton-background','cutton-bgm'].includes(sourceProvenance.kind)){
+    if(['cutton-background','cutton-bgm','cutton-audio-process'].includes(sourceProvenance.kind)){
       if(JSON.stringify(sourceProvenance).length>1000000)throw new AppError('仕上げ素材の履歴が大きすぎます。');
       const provenance={...structuredClone(sourceProvenance),restored:true};
       if(provenance.sourceAssetId)provenance.sourceAssetId=idMap.get(provenance.sourceAssetId)||null;
@@ -350,6 +354,8 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
         if(draft.clips.length>20000)throw new AppError('クリップ数の上限です。');for(const c of draft.clips){validateClip(draft,c);if(c.duration<1/draft.fps-1e-6)throw new AppError('クリップは1フレーム以上必要です。');}for(const [key,kind] of [['captions','caption'],['graphics','graphics']])for(const g of draft[key])createOverlay(kind,g,g.id);return result;
       }
       case 'audio.syncApply':{if(args.projectId!==draft.id||args.updatedAt!==draft.updatedAt)throw new AppError('解析後に編集内容が変わりました。再解析してください。');const c=requireItem(draft.clips,args.targetId,'同期対象');c.start=numberValue(args.start,'同期時刻');validateClip(draft,alignClipToFrames(draft,c));return {id:c.id,start:c.start};}
+      case 'audio.process': return processAudio(draft,args,dataDir);
+      case 'timeline.batch': {const result=batchEdit(draft,args);if(draft.clips.length>20000||draft.captions.length>5000||draft.graphics.length>5000)throw new AppError('要素数の上限を超えています。');for(const c of draft.clips)validateClip(draft,c);validateVectorLinks(draft.graphics);return result;}
       case 'graphics.compose':return createComposition(draft,args);
       case 'graphics.batch':return motionBatch(draft,args);
       case 'graphics.layout': {const items=motionLayout(args).map(item=>createOverlay('graphics',item));if(draft.graphics.length+items.length>5000)throw new AppError('グラフィックは5000個以内です。');draft.graphics.push(...items);return {items};}
@@ -510,6 +516,7 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
       }
       case 'asset.remove': {
         const asset = requireItem(draft.assets, args.id, '素材');
+        if(draft.assets.some(a=>a.provenance?.kind==='cutton-audio-process'&&a.provenance.sourceAssetId===asset.id))throw new AppError('調整音の再編集に必要な元音声です。先に調整音の素材を削除してください。');
         if (draft.clips.some((clip) => clip.assetId === asset.id)) throw new AppError('タイムラインで使われている素材です。先にクリップを削除してください。');
         draft.assets = draft.assets.filter((item) => item.id !== asset.id);
         draft.decisions = draft.decisions.filter((item) => item.assetId !== asset.id);

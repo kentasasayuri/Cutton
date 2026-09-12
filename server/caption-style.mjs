@@ -2,7 +2,7 @@
 import {BUNDLED_FONTS,validFontFamily} from './font-catalog.mjs';
 export const CAPTION_FONTS=['Meiryo','Yu Gothic','Yu Mincho','Arial',...BUNDLED_FONTS.map(f=>f.family)];
 export const CAPTION_TRANSITIONS=[['none','なし'],['fade','フェード'],['up','下から / 上へ'],['down','上から / 下へ'],['left','左から / 左へ'],['right','右から / 右へ'],['zoom','ズーム'],['pop','ポップ'],['tilt','傾き'],['spin','回転']];
-export const captionDefaults={enterAnimation:'none',exitAnimation:'none',enterDuration:.35,exitDuration:.25,outerOutline:0,outerOutlineColor:'#ffffff',fontFamily:'Meiryo',fontWeight:700,outline:2,outlineColor:'#101820',opacity:1,gradient:false,gradientColor:'#53e0ed',gradientAngle:90,tracking:0,lineHeight:1.3,shadow:1,background:false,backgroundColor:'#101820',backgroundOpacity:.65,padding:16,cornerRadius:8,textAnimation:'none',animationDuration:.6,stagger:.05,karaoke:'none',highlightColor:'#ffdb58',words:[]};
+export const captionDefaults={gloss:0,glow:0,glowColor:'#55ddff',extrude:0,extrudeColor:'#182333',gradientMiddle:false,gradientMiddleColor:'#ffffff',enterAnimation:'none',exitAnimation:'none',enterDuration:.35,exitDuration:.25,outerOutline:0,outerOutlineColor:'#ffffff',fontFamily:'Meiryo',fontWeight:700,outline:2,outlineColor:'#101820',opacity:1,gradient:false,gradientColor:'#53e0ed',gradientAngle:90,tracking:0,lineHeight:1.3,shadow:1,background:false,backgroundColor:'#101820',backgroundOpacity:.65,padding:16,cornerRadius:8,textAnimation:'none',animationDuration:.6,stagger:.05,karaoke:'none',highlightColor:'#ffdb58',words:[]};
 const segmenter=new Intl.Segmenter('ja',{granularity:'grapheme'});
 export const graphemes=value=>Array.from(segmenter.segment(String(value)),s=>s.segment);
 // Projects are immutable snapshots. Cache only per-caption layout/timing, never video frames.
@@ -12,9 +12,9 @@ const hex=v=>{if(typeof v!=='string'||!/^#[a-f0-9]{6}$/i.test(v))throw new Error
 export function captionStyle(args,duration,text){
  const v={...captionDefaults,...args};const result={};
  if(!validFontFamily(v.fontFamily))throw new Error('フォント名が不正です。');result.fontFamily=v.fontFamily;
- for(const [key,min,max] of [['enterDuration',.05,10],['exitDuration',.05,10],['outerOutline',0,30],['fontWeight',100,900],['outline',0,30],['opacity',0,1],['gradientAngle',-360,360],['tracking',-10,40],['lineHeight',.8,3],['shadow',0,30],['backgroundOpacity',0,1],['padding',0,100],['cornerRadius',0,100],['animationDuration',.05,10],['stagger',0,1]])result[key]=finite(v[key],min,max,key);
- for(const key of ['outerOutlineColor','outlineColor','gradientColor','backgroundColor','highlightColor'])result[key]=hex(v[key]);
- for(const key of ['gradient','background']){if(typeof v[key]!=='boolean')throw new Error(`${key} must be boolean`);result[key]=v[key];}
+ for(const [key,min,max] of [['gloss',0,1],['glow',0,24],['extrude',0,12],['enterDuration',.05,10],['exitDuration',.05,10],['outerOutline',0,30],['fontWeight',100,900],['outline',0,30],['opacity',0,1],['gradientAngle',-360,360],['tracking',-10,40],['lineHeight',.8,3],['shadow',0,30],['backgroundOpacity',0,1],['padding',0,100],['cornerRadius',0,100],['animationDuration',.05,10],['stagger',0,1]])result[key]=finite(v[key],min,max,key);
+ for(const key of ['glowColor','extrudeColor','gradientMiddleColor','outerOutlineColor','outlineColor','gradientColor','backgroundColor','highlightColor'])result[key]=hex(v[key]);
+ for(const key of ['gradientMiddle','gradient','background']){if(typeof v[key]!=='boolean')throw new Error(`${key} must be boolean`);result[key]=v[key];}
  for(const [key,choices] of [['enterAnimation',CAPTION_TRANSITIONS.map(([id])=>id)],['exitAnimation',CAPTION_TRANSITIONS.map(([id])=>id)],['textAnimation',['none','typewriter','fade-letters','rise-letters','pop-letters','wave']],['karaoke',['none','sweep','words']]]){if(!choices.includes(v[key]))throw new Error(`Invalid ${key}`);result[key]=v[key];}
  if(!Array.isArray(v.words)||v.words.length>500)throw new Error('単語タイミングは500件までです。');
  let previous=0;
@@ -57,14 +57,17 @@ export function captionsSvg(state,time){
  const transition=captionTransition(v,t);
  const angle=v.gradientAngle*Math.PI/180,gx=Math.cos(angle)*.5,gy=Math.sin(angle)*.5;
  const boxWidth=Math.min(width*.94,Math.max(0,...lines.map(line=>line.reduce((n,g)=>n+g.advance,0)))+v.padding*2),boxHeight=lines.length*v.fontSize*v.lineHeight+v.padding*2;
- content+=`<defs><filter id="${id}s" x="-50%" y="-100%" width="200%" height="300%"><feDropShadow dx="0" dy="${v.shadow}" stdDeviation="${v.shadow/2}" flood-opacity=".65"/></filter></defs><g data-caption-id="${esc(v.id)}" transform="translate(${width*v.x/100+transition.x} ${height*v.y/100+transition.y}) rotate(${transition.rotation}) scale(${transition.scale})" opacity="${transition.opacity}">`;
+ content+=`<defs><filter id="${id}s" x="-50%" y="-100%" width="200%" height="300%"><feDropShadow dx="0" dy="${v.shadow}" stdDeviation="${v.shadow/2}" flood-opacity=".65"/></filter><filter id="${id}gl" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="${v.glow/2}"/></filter><linearGradient id="${id}shine" x1="0" y1="0" x2="0" y2="1"><stop stop-color="white" stop-opacity=".9"/><stop offset=".45" stop-color="white" stop-opacity=".6"/><stop offset=".48" stop-color="white" stop-opacity="0"/><stop offset="1" stop-color="white" stop-opacity=".15"/></linearGradient></defs><g data-caption-id="${esc(v.id)}" transform="translate(${width*v.x/100+transition.x} ${height*v.y/100+transition.y}) rotate(${transition.rotation}) scale(${transition.scale})" opacity="${transition.opacity}">`;
  if(v.background)content+=`<rect x="${-boxWidth/2}" y="${-boxHeight/2}" width="${boxWidth}" height="${boxHeight}" rx="${v.cornerRadius}" fill="${v.backgroundColor}" opacity="${v.backgroundOpacity*v.opacity}"/>`;
  for(const g of glyphs){const a=captionGlyphState(v,g.index,t),key=id+'_'+g.index,attrs=`x="0" y="${v.fontSize*.36}" text-anchor="middle" font-family="${esc(v.fontFamily)}" font-weight="${v.fontWeight}" font-size="${v.fontSize}"`;
- if(v.gradient)content+=`<defs><linearGradient id="${key}g" gradientUnits="userSpaceOnUse" x1="${-gx*(boxWidth-v.padding*2)-g.x}" y1="${-gy*(boxHeight-v.padding*2)-g.y}" x2="${gx*(boxWidth-v.padding*2)-g.x}" y2="${gy*(boxHeight-v.padding*2)-g.y}"><stop stop-color="${v.color}"/><stop offset="1" stop-color="${v.gradientColor}"/></linearGradient></defs>`;
+ if(v.gradient)content+=`<defs><linearGradient id="${key}g" gradientUnits="userSpaceOnUse" x1="${-gx*(boxWidth-v.padding*2)-g.x}" y1="${-gy*(boxHeight-v.padding*2)-g.y}" x2="${gx*(boxWidth-v.padding*2)-g.x}" y2="${gy*(boxHeight-v.padding*2)-g.y}"><stop stop-color="${v.color}"/>${v.gradientMiddle?`<stop offset=".5" stop-color="${v.gradientMiddleColor}"/>`:""}<stop offset="1" stop-color="${v.gradientColor}"/></linearGradient></defs>`;
  content+=`<g transform="translate(${g.x} ${g.y+a.y}) scale(${a.scale})" opacity="${a.opacity}"${v.shadow?` filter="url(#${id}s)"`:''}>`;
+ if(v.glow)content+=`<text ${attrs} fill="${v.glowColor}" stroke="${v.glowColor}" stroke-width="${v.glow/2}" filter="url(#${id}gl)">${esc(g.text)}</text>`;
+ for(let d=Math.ceil(v.extrude);d>0;d--)content+=`<text ${attrs} transform="translate(${d} ${d})" fill="${v.extrudeColor}" stroke="${v.extrudeColor}" stroke-width="${v.outline*2}">${esc(g.text)}</text>`;
  if(v.outerOutline)content+=`<text ${attrs} fill="none" stroke="${v.outerOutlineColor}" stroke-width="${(v.outline+v.outerOutline)*2}" stroke-linejoin="round">${esc(g.text)}</text>`;
  if(v.outline)content+=`<text ${attrs} fill="none" stroke="${v.outlineColor}" stroke-width="${v.outline*2}" stroke-linejoin="round">${esc(g.text)}</text>`;
  content+=`<text ${attrs} fill="${v.gradient?`url(#${key}g)`:v.color}">${esc(g.text)}</text>`;
+ if(v.gloss)content+=`<text ${attrs} fill="url(#${id}shine)" opacity="${v.gloss}">${esc(g.text)}</text>`;
  if(v.karaoke!=='none'&&a.progress>0){const clipWidth=(g.advance+v.fontSize*.4)*a.progress;content+=`<defs><clipPath id="${key}"><rect x="${-g.advance/2-v.fontSize*.2}" y="${-v.fontSize}" width="${clipWidth}" height="${v.fontSize*2}"/></clipPath></defs><text ${attrs} fill="${v.highlightColor}" clip-path="url(#${key})">${esc(g.text)}</text>`;}
  content+='</g>';}
  content+='</g>';
