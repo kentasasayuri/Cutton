@@ -3,7 +3,8 @@ import {keyFilter} from '../server/chroma-key.mjs';
 import {encodeThreads,PERFORMANCE} from '../server/performance.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { EFFECT_DEFAULTS } from '../server/clip-effects.mjs';
+import { EFFECT_DEFAULTS,maskSvg } from '../server/clip-effects.mjs';
+import {Resvg} from '@resvg/resvg-js';
 
 export const needsLayerRender = state => mixerChanged(state.audioMixer) || state.clips.some(c => c.lane>0 || (c.speed??1)!==1 || Object.entries(EFFECT_DEFAULTS).some(([k,v])=>(c[k]??v)!==v));
 const n=v=>Number(v.toFixed(7));
@@ -17,12 +18,13 @@ export async function renderLayers(state, scratch, run, {lossless=false}={}) {
   const boundaries=new Set([0,total]);
   clips.forEach(c=>{boundaries.add(c.start);boundaries.add(c.start+c.duration);});
   for(let t=60;t<total;t+=60)boundaries.add(t);
-  const points=[...boundaries].sort((a,b)=>a-b),files=[];
+  const points=[...boundaries].sort((a,b)=>a-b),files=[],masks=new Map();
+  for(const c of clips.filter(c=>c.track==='video'&&c.maskShape&&c.maskShape!=='none')){const sw=Math.max(2,Math.round(w*(c.scale||1)/2)*2),sh=Math.max(2,Math.round(h*(c.scale||1)/2)*2),svg=maskSvg(c).replace('width="100" height="100" viewBox',`width="${sw}" height="${sh}" viewBox`),file=path.join(scratch,`mask-${masks.size}.png`);await fs.writeFile(file,new Resvg(svg).render().asPng());masks.set(c.id,file);}
   for(let i=0;i<points.length-1;i++){
     const start=points[i],duration=n(points[i+1]-start);if(duration<.5/fps)continue;
     const active=clips.filter(c=>c.start<points[i+1]-1e-6&&c.start+c.duration>start+1e-6).sort((a,b)=>(a.lane||0)-(b.lane||0));
     const inputs=[],filters=[`color=c=black:s=${w}x${h}:r=${fps}:d=${duration}[base]`,`anullsrc=r=48000:cl=stereo,atrim=duration=${duration}[silence]`];
-    let last='base';const audio=[];
+    let last='base';const audio=[],maskInputs=[];
     active.forEach((raw,index)=>{
       const c={...EFFECT_DEFAULTS,speed:1,...raw},asset=state.assets.find(a=>a.id===c.assetId),offset=start-c.start;
       if(!asset)throw new Error('素材が見つかりません。');
@@ -43,13 +45,19 @@ export async function renderLayers(state, scratch, run, {lossless=false}={}) {
         }
         // Alpha is evaluated at the project's frame time, including partial segments.
         const alpha=c.opacity===1&&!c.fadeIn&&!c.fadeOut?'':`,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*${c.opacity}*${fade.replaceAll('t','T')}'`;
-        filters.push(`${visual},format=rgba,scale=${sw}:${sh}:force_original_aspect_ratio=decrease,pad=${sw}:${sh}:(ow-iw)/2:(oh-ih)/2:color=${c.keyEnabled?'black@0':'black'},setsar=1,format=rgba${crop}${c.rotation?`,rotate=${c.rotation*Math.PI/180}:ow=rotw(${c.rotation*Math.PI/180}):oh=roth(${c.rotation*Math.PI/180}):c=none`:''}${alpha}[v${index}]`);
-        filters.push(`[${last}][v${index}]overlay=x=${n(w*c.x/100)}-w/2:y=${n(h*c.y/100)}-h/2:shortest=0:eof_action=pass[vout${index}]`);last=`vout${index}`;
+        filters.push(`${visual},format=rgba,scale=${sw}:${sh}:force_original_aspect_ratio=decrease,pad=${sw}:${sh}:(ow-iw)/2:(oh-ih)/2:color=${c.keyEnabled?'black@0':'black'},setsar=1,format=rgba[scaled${index}]`);
+        let shaped=`[scaled${index}]`;
+        if(masks.has(c.id)){const mi=active.length+maskInputs.length;maskInputs.push(masks.get(c.id));filters.push(`[scaled${index}]split[mc${index}][ma${index}]`,`[ma${index}]alphaextract[oa${index}]`,`[${mi}:v]format=rgba,alphaextract[mask${index}]`,`[oa${index}][mask${index}]blend=all_mode=multiply[alpha${index}]`,`[mc${index}][alpha${index}]alphamerge[masked${index}]`);shaped=`[masked${index}]`;}
+        filters.push(`${shaped}null${crop}${c.rotation?`,rotate=${c.rotation*Math.PI/180}:ow=rotw(${c.rotation*Math.PI/180}):oh=roth(${c.rotation*Math.PI/180}):c=none`:''}${alpha}[v${index}]`);
+        if(c.blendMode==='normal')filters.push(`[${last}][v${index}]overlay=x=${n(w*c.x/100)}-w/2:y=${n(h*c.y/100)}-h/2:shortest=0:eof_action=pass[vout${index}]`);
+        else{filters.push(`color=c=black@0:s=${w}x${h}:r=${fps}:d=${duration},format=rgba[canvas${index}]`,`[canvas${index}][v${index}]overlay=x=${n(w*c.x/100)}-w/2:y=${n(h*c.y/100)}-h/2:format=auto[placed${index}]`,`[placed${index}]split[pc${index}][pa${index}]`,`[pa${index}]alphaextract,format=gbrp[pm${index}]`,`[pc${index}]format=gbrp[fg${index}]`,`[${last}]format=gbrp,split[bg${index}][keep${index}]`,`[bg${index}][fg${index}]blend=all_mode=${c.blendMode}[blend${index}]`,`[keep${index}][blend${index}][pm${index}]maskedmerge[vout${index}]`);}last=`vout${index}`;
       }else{
         const tempo=c.speed<.5?`atempo=0.5,atempo=${c.speed/.5}`:c.speed>2?`atempo=2,atempo=${c.speed/2}`:`atempo=${c.speed}`;
-        filters.push(`[${index}:a]asetpts=PTS-STARTPTS,${tempo},aresample=48000,volume='${c.gain??1}*${fade}':eval=frame,${mixerFilters(mixer,c.lane||0)},apad,atrim=duration=${duration}[a${index}]`);audio.push(`[a${index}]`);
+        const envelope=c.fadeCurve==='equalPower'?`sin(PI/2*max(0,${fade}))`:fade;
+        filters.push(`[${index}:a]asetpts=PTS-STARTPTS,${tempo},aresample=48000,volume='${c.gain??1}*${envelope}':eval=frame,${mixerFilters(mixer,c.lane||0)},apad,atrim=duration=${duration}[a${index}]`);audio.push(`[a${index}]`);
       }
     });
+    for(const file of maskInputs)inputs.push('-loop','1','-framerate',String(fps),'-threads','1','-i',file);
     filters.push(`[${last}]trim=duration=${duration},format=yuv420p[vfinal]`);
     filters.push(`[silence]${audio.join('')}amix=inputs=${audio.length+1}:normalize=0:duration=first,volume=${dbGain(mixer.masterDb)},alimiter=limit=0.98:level=0:latency=1[afinal]`);
     const file=`layer-${String(i).padStart(5,'0')}.mkv`;

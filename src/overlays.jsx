@@ -1,4 +1,5 @@
 import MotionFields from './motion-fields';
+import {CompositionPanel} from './pro-panels';
 import {CaptionReview,CaptionBoundaryTools,BackgroundPanel,MotionLayoutPanel} from './finishing-panels';
 import {moveGraphicDraft} from '../server/motion-layouts.mjs';
 import {CaptionFields,CaptionPreview} from './caption-editor';
@@ -62,7 +63,7 @@ function OverlayForm({ item, kind, state, clock, run, busy, onSelect, onNew }) {
 export function OverlayEditor({ state, selected, mode, onMode, onSelect, clock, run, busy }) {
   const items = mode === 'caption' ? state.captions || [] : state.graphics || [];
   const item = selected?.type === mode ? items.find(i => i.id === selected.id) : null;
-  const helpers=mode==='caption'?<CaptionReview state={state} onSelect={onSelect} clock={clock} run={run} busy={busy}/>:<><BackgroundPanel state={state} run={run} busy={busy}/><MotionLayoutPanel clock={clock} run={run} busy={busy}/></>;
+  const helpers=mode==='caption'?<CaptionReview state={state} onSelect={onSelect} clock={clock} run={run} busy={busy}/>:<><BackgroundPanel state={state} run={run} busy={busy}/><CompositionPanel state={state} clock={clock} run={run} busy={busy}/><MotionLayoutPanel clock={clock} run={run} busy={busy}/></>;
   return <>{helpers}<div className="overlay-mode-switch"><button className={mode === 'caption' ? 'active' : ''} data-action="overlay.captions" onClick={() => onMode('caption')}>字幕</button><button className={mode === 'graphic' ? 'active' : ''} data-action="overlay.graphics" onClick={() => onMode('graphic')}>グラフィック</button></div><OverlayForm key={`${mode}-${item?.id || 'new'}`} item={item} kind={mode} state={state} clock={clock} run={run} busy={busy} onSelect={onSelect} onNew={() => onSelect(null)} />{items.length > 0 && <div className="overlay-layer-list"><div className="inspector-section-title">レイヤー <span>{items.length}</span></div>{items.map(layer => <button key={layer.id} className={item?.id === layer.id ? 'active' : ''} data-action={`${mode}.select`} data-entity-id={layer.id} onClick={() => onSelect({ type: mode, id: layer.id })}><span>{layer.text || layer.type}</span><small>{timecode(layer.start).slice(3, 8)} · {layer.duration}s</small></button>)}</div>}</>;
 }
 

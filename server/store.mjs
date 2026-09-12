@@ -1,4 +1,7 @@
 import {alignItems,cutRanges} from './timing-edits.mjs';
+import {trimEdit,placeClip,mergeContinuous,layerEdit,syncPoints,crossfade} from './pro-edits.mjs';
+import {createComposition,motionBatch} from './motion-compositions.mjs';
+import {analyzeAudioSync} from './audio-sync.mjs';
 import {captionIssues,mergeCaptions,splitCaption,applyCaptionLook} from './caption-editing.mjs';
 import {backgroundAsset,bgmOptions,prepareBgm} from './finishing.mjs';
 import {motionLayout} from './motion-layouts.mjs';
@@ -21,11 +24,20 @@ import { projectLibrary } from './project-library.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EPSILON = 0.000001;
 export const COMMANDS = [
+  ['timeline.trim','ロール・リップル・スライド・スリップをフレーム単位で調整',['id','mode?','edge?','frames']],
+  ['timeline.place','素材を挿入・上書き・上のトラックへ配置',['assetId','mode?','track?','lane?','start?','in?','duration?']],
+  ['timeline.merge','同一素材の連続カットを結合',['ids']],['timeline.layers','選択クリップのレイヤー上下・表示を変更',['ids','action']],
+  ['timeline.syncPoints','クリップ内の基準時刻を合わせる',['referenceId','targetId','referencePoint?','targetPoint?']],
+  ['audio.syncAnalyze','共通音声の波形を比較し同期候補を返す（読み取りのみ）',['referenceId','targetId','maxShift?']],
+  ['audio.syncApply','確認した音声同期候補の配置を適用',['targetId','start','projectId','updatedAt']],
+  ['audio.crossfade','隣接音声をハンドルで重ね、等電力クロスフェードを作成',['leftId','rightId','duration?','curve?']],
+  ['graphics.compose','複数レイヤーのモーション構成を追加',['preset','title','subtitle?','start?','duration?','color?']],
+  ['graphics.batch','動きの反転・時間差・入退場を保った尺変更・重なり順',['ids','action','duration?','protect?','gap?']],
   ['graphics.layout','比較・段階表示の編集可能なモーションを一括追加',['preset','texts','start?','duration?','y?','fontSize?']],
   ['caption.check','字幕の語尾・表示時間・重なりを確認',[]], ['caption.merge','隣り合う字幕を時刻付きで結合',['ids']], ['caption.split','文字位置で字幕を分割',['id','index','at?']], ['caption.look','字幕の読みやすさ・強調スタイルを適用',['ids','preset']],
   ['background.apply','背景を追加・差し替え、指定映像の余白を透過',['preset','replaceClipId?','foregroundLane?','top?','bottom?','left?','right?']],
   ['audio.prepareBgm','BGMを尺に合わせ、声に連動する音量で別素材へ保存',['assetId','duration?','voiceLane?','lane?','ducking?','level?','fadeIn?','fadeOut?']],
-  ['audio.track.update','トラックの音量・バランス・ミュート・ソロ・EQを設定',['lane','volumeDb?','balance?','mute?','solo?','lowDb?','midDb?','highDb?','lowHz?','midHz?','highHz?','midQ?','highpass?','highpassHz?','lowpass?','lowpassHz?']], ['audio.master.update','マスター音量を設定',['masterDb']], ['sfx.create','内蔵効果音を作成して空き音声トラックに配置',['preset?','duration?','frequency?','levelDb?','seed?','start?','lane?']],
+  ['audio.track.update','トラックの音量・バランス・ミュート・ソロ・EQを設定',['lane','volumeDb?','balance?','mute?','solo?','lowDb?','midDb?','highDb?','lowHz?','midHz?','highHz?','midQ?','highpass?','highpassHz?','lowpass?','lowpassHz?','compressor?','thresholdDb?','ratio?','kneeDb?','attackMs?','releaseMs?','makeupDb?']], ['audio.master.update','マスター音量を設定',['masterDb']], ['sfx.create','内蔵効果音を作成して空き音声トラックに配置',['preset?','duration?','frequency?','levelDb?','seed?','start?','lane?']],
   ['timeline.align','選択要素をまとめて揃える',['items','mode?','at?','gap?']], ['timeline.cutRanges','全トラックから範囲を除去して字幕・マーカーも詰める',['ranges']], ['timeline.splitAll','全映像・音声を再生位置で分割',['at']],
   ['edit.undo','編集を戻す',[]], ['edit.redo','編集をやり直す',[]], ['timeline.rippleRemove','削除して同じトラックの後続を詰める',['id']], ['timeline.closeGaps','同じトラックの空白を詰める',['track?','lane?']], ['timeline.slip','配置を保持して素材の使用範囲をずらす',['id','offset']], ['marker.add','マーカーを追加',['time','name?']], ['marker.remove','マーカーを削除',['id']],
   ['project.list','保存済みプロジェクト一覧',[]], ['project.switch','プロジェクトを切り替える',['id']], ['project.duplicate','プロジェクトを複製',['name?']], ['project.settings','解像度・フレームレートを設定',['width?','height?','fps?']],
@@ -41,7 +53,7 @@ export const COMMANDS = [
   ['image.generate','Codexのサブスク枠で画像を生成して素材へ取り込む',['prompt','aspect?','sceneId?']],
   ['narration.prepare', 'Google Vidsへ渡す台本とプロンプトを作成', ['prompt', 'sceneId?', 'mode?', 'language?', 'voice?', 'voiceName?', 'avatarId?', 'delivery?', 'vocalization?', 'direction?']], ['narration.import', 'Vidsの音声またはMP4から音声を取り込む', ['path', 'sceneId?', 'jobId?']],
   ['export.create', 'プロジェクト・編集表・MP4を書き出す', ['format']], ['decisions.export', '採否の判断例をSKILL.mdへ書き出す', []],
-].map(([name, description, args]) => ({ name, description, args: [...args, ...(/^timeline\.(add|update)$/.test(name)?['cropLeft?','cropRight?','cropTop?','cropBottom?','keyEnabled?','keyColor?','keySimilarity?','keyBlend?','keySpill?']:[]), ...(/^caption\.(add|update)$/.test(name)?Object.keys(captionDefaults).map(k=>k+'?'):[]), ...(/^graphics\.(add|update)$/.test(name)?['fontFamily?','rotation?', 'shape?', 'mask?', 'repeat?', 'parentId?', 'matteId?', 'stroke?', 'strokeColor?', 'fillOpacity?', 'sides?', 'innerRadius?', 'gradient?', 'gradientColor?', 'gradientAngle?', 'strokeStart?', 'strokeEnd?', 'strokeAnimation?', 'copies?', 'copyX?', 'copyY?', 'copyRotation?', 'copyOpacity?', 'radius?', 'shadow?', 'glow?', 'wiggle?', 'frequency?', 'tracking?', 'fontWeight?', 'textColor?']:[])] }));
+].map(([name, description, args]) => ({ name, description, args: [...args, ...(/^timeline\.(add|update)$/.test(name)?['blendMode?','maskShape?','maskX?','maskY?','maskWidth?','maskHeight?','maskFeather?','maskInvert?','fadeCurve?','cropLeft?','cropRight?','cropTop?','cropBottom?','keyEnabled?','keyColor?','keySimilarity?','keyBlend?','keySpill?']:[]), ...(/^caption\.(add|update)$/.test(name)?Object.keys(captionDefaults).map(k=>k+'?'):[]), ...(/^graphics\.(add|update)$/.test(name)?['fontFamily?','rotation?', 'shape?', 'mask?', 'repeat?', 'parentId?', 'matteId?', 'stroke?', 'strokeColor?', 'fillOpacity?', 'sides?', 'innerRadius?', 'gradient?', 'gradientColor?', 'gradientAngle?', 'strokeStart?', 'strokeEnd?', 'strokeAnimation?', 'copies?', 'copyX?', 'copyY?', 'copyRotation?', 'copyOpacity?', 'radius?', 'shadow?', 'glow?', 'wiggle?', 'frequency?', 'tracking?', 'fontWeight?', 'textColor?']:[])] }));
 
 export function emptyState(name = '新しいプロジェクト', settings = {}) {
   return { id: uid('project'), name, fps: 30, width: 1920, height: 1080, updatedAt: now(), audioMixer:mixerSettings(), storyboard: [], assets: [], clips: [], captions: [], graphics: [], markers: [], decisions: [], jobs: [], settings: { comfyUrl: 'http://127.0.0.1:8188', vidsUrl: '', codexModel: '', ...settings } };
@@ -240,6 +252,13 @@ async function openProject(input, current, dataDir) {
   for (const sourceAsset of imported.assets) {
     if (!sourceAsset.provenance) continue;
     const sourceProvenance = object(sourceAsset.provenance, '素材の生成履歴');
+    if(['cutton-background','cutton-bgm'].includes(sourceProvenance.kind)){
+      if(JSON.stringify(sourceProvenance).length>1000000)throw new AppError('仕上げ素材の履歴が大きすぎます。');
+      const provenance={...structuredClone(sourceProvenance),restored:true};
+      if(provenance.sourceAssetId)provenance.sourceAssetId=idMap.get(provenance.sourceAssetId)||null;
+      if(Array.isArray(provenance.voiceClips))provenance.voiceClips=provenance.voiceClips.map(c=>({...c,assetId:idMap.get(c.assetId)||null}));
+      restored.assets.find(asset=>asset.id===idMap.get(sourceAsset.id)).provenance=provenance;continue;
+    }
     const type = choice(sourceProvenance.type, ['comfyui', 'google-vids-import', 'codex-image'], '素材の生成元');
     const provenance = { type, restored: true };
     for (const [key, max] of [['mode', 100], ['sourceName', 200], ['promptId', 200], ['prompt', 20000], ['revisedPrompt', 30000], ['model', 200], ['billing', 100]]) if (sourceProvenance[key] !== undefined) provenance[key] = textValue(sourceProvenance[key], key, { max });
@@ -326,6 +345,13 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
   const executeMutation = (command, args = {}) => transact(async (draft) => {
     textValue(command, 'command', { max: 100 }); object(args);
     switch (command) {
+      case 'timeline.trim':case 'timeline.place':case 'timeline.merge':case 'timeline.layers':case 'timeline.syncPoints':case 'audio.crossfade': {
+        const action={'timeline.trim':trimEdit,'timeline.place':placeClip,'timeline.merge':mergeContinuous,'timeline.layers':layerEdit,'timeline.syncPoints':syncPoints,'audio.crossfade':crossfade}[command];const result=action(draft,args,makeClip);
+        if(draft.clips.length>20000)throw new AppError('クリップ数の上限です。');for(const c of draft.clips){validateClip(draft,c);if(c.duration<1/draft.fps-1e-6)throw new AppError('クリップは1フレーム以上必要です。');}for(const [key,kind] of [['captions','caption'],['graphics','graphics']])for(const g of draft[key])createOverlay(kind,g,g.id);return result;
+      }
+      case 'audio.syncApply':{if(args.projectId!==draft.id||args.updatedAt!==draft.updatedAt)throw new AppError('解析後に編集内容が変わりました。再解析してください。');const c=requireItem(draft.clips,args.targetId,'同期対象');c.start=numberValue(args.start,'同期時刻');validateClip(draft,alignClipToFrames(draft,c));return {id:c.id,start:c.start};}
+      case 'graphics.compose':return createComposition(draft,args);
+      case 'graphics.batch':return motionBatch(draft,args);
       case 'graphics.layout': {const items=motionLayout(args).map(item=>createOverlay('graphics',item));if(draft.graphics.length+items.length>5000)throw new AppError('グラフィックは5000個以内です。');draft.graphics.push(...items);return {items};}
       case 'caption.merge': return mergeCaptions(draft,args.ids);
       case 'caption.split': {if(draft.captions.length>=5000)throw new AppError('字幕は5000個以内です。');return splitCaption(draft,args);}
@@ -657,7 +683,7 @@ export async function createStore({ dataDir = process.env.CUTTON_DATA_DIR || pro
     const work=exportQueue.then(async()=>{const {source,format}=await prepared;const {exportProject}=await import('../exporters/index.mjs');const result=await exportProject(source,{format,dataDir});return {state:snapshot(),result:{...result,projectId:source.id,projectUpdatedAt:source.updatedAt}};});
     prepared.catch(()=>{});exportQueue=work.catch(()=>{});return work;
   };
-  const execute = (command, args = {}) => command==='caption.check'?Promise.resolve({state:snapshot(),result:{issues:captionIssues(state)}}):command==='image.generate'?startImage(args):command==='export.create'?exportSnapshot(args):command === 'project.list' ? library.list().then(projects=>({state:snapshot(),result:{projects}})) : command === 'asset.waveform' ? (async () => {
+  const execute = (command, args = {}) => command==='audio.syncAnalyze'?analyzeAudioSync(snapshot(),args).then(result=>({state:snapshot(),result})):command==='caption.check'?Promise.resolve({state:snapshot(),result:{issues:captionIssues(state)}}):command==='image.generate'?startImage(args):command==='export.create'?exportSnapshot(args):command === 'project.list' ? library.list().then(projects=>({state:snapshot(),result:{projects}})) : command === 'asset.waveform' ? (async () => {
     object(args);
     const result = await waveform(args.id);
     return { state: snapshot(), result };

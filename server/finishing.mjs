@@ -30,7 +30,7 @@ export async function prepareBgm(state,args,dataDir){
   if(o.ducking){
    const names=[];let cursor=0;const mixer=mixerSettings(state.audioMixer);
    async function segment(duration,clip){if(duration<.00001)return;const name=`voice-${names.length}.wav`,file=path.join(folder,name);let input,filter;
-    if(clip){const a=requireItem(state.assets,clip.assetId,'ナレーション素材'),speed=clip.speed||1,tempo=speed<.5?`atempo=.5,atempo=${speed/.5}`:speed>2?`atempo=2,atempo=${speed/2}`:`atempo=${speed}`;input=['-ss',String(clip.in),'-t',String(duration*speed+.1),'-threads','1','-i',a.path];filter=`${tempo},volume=${clip.gain??1},${mixerFilters(mixer,o.voiceLane)}${clip.fadeIn?`,afade=t=in:d=${clip.fadeIn}`:''}${clip.fadeOut?`,afade=t=out:st=${Math.max(0,clip.duration-clip.fadeOut)}:d=${clip.fadeOut}`:''},apad`;
+    if(clip){const a=requireItem(state.assets,clip.assetId,'ナレーション素材'),speed=clip.speed||1,tempo=speed<.5?`atempo=.5,atempo=${speed/.5}`:speed>2?`atempo=2,atempo=${speed/2}`:`atempo=${speed}`;input=['-ss',String(clip.in),'-t',String(duration*speed+.1),'-threads','1','-i',a.path];filter=`${tempo},volume=${clip.gain??1},${mixerFilters(mixer,o.voiceLane)}${clip.fadeIn?`,afade=t=in:d=${clip.fadeIn}:curve=${clip.fadeCurve==='equalPower'?'qsin':'tri'}`:''}${clip.fadeOut?`,afade=t=out:st=${Math.max(0,clip.duration-clip.fadeOut)}:d=${clip.fadeOut}:curve=${clip.fadeCurve==='equalPower'?'qsin':'tri'}`:''},apad`;
     }else{input=['-f','lavfi','-i','anullsrc=r=48000:cl=stereo'];filter='anull';}
     await run([...input,'-t',String(duration),'-vn','-af',filter,'-ac','2','-ar','48000','-c:a','pcm_s16le',file]);names.push(name);
    }
