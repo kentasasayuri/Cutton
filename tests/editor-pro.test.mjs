@@ -10,7 +10,7 @@ import {exportProject} from '../exporters/index.mjs';
 import {createOverlay,cubicEase} from '../server/overlays.mjs';
 import {vectorSvg,validateVectorLinks,vectorTransform} from '../server/vector.mjs';
 import {createApp} from '../server/app.mjs';
-import {SITE_ORIGIN} from '../server/site-bridge.mjs';
+import {HOSTED_UI_ORIGIN} from '../server/site-bridge.mjs';
 import {toFcpxml} from '../exporters/fcpxml.mjs';
 const exec=promisify(execFile);
 async function setup(){const dataDir=await fs.mkdtemp(path.join(os.tmpdir(),'cutton-pro-'));return {dataDir,store:await createStore({dataDir})};}
@@ -66,13 +66,13 @@ test('real multi-track MP4 composes layers, mixes audio and renders a vector mat
   const pixel=(x,y)=>[...raw.stdout.subarray((y*320+x)*3,(y*320+x)*3+3)];
   const red=pixel(310,90),green=pixel(64,90),center=pixel(160,90),outsideMatte=pixel(37,90);assert.ok(red[0]>180&&red[1]<50);assert.ok(green[1]>150&&green[0]<80);assert.ok(center[0]<150);assert.ok(outsideMatte[0]>180&&outsideMatte[1]<50);
 });
-test('Sites bridge pairs only exact owner origin and rejects malformed bearer tokens',async()=>{
+test('hosted UI bridge pairs only the configured origin and rejects malformed bearer tokens',async()=>{
   const {store}=await setup();const created=await createApp({store});const app=created.app||created;
   const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
   try{
     const bad=await fetch(base+'/api/pair',{method:'POST',headers:{Origin:'https://evil.example'}});assert.equal(bad.status,403);
-    const pair=await fetch(base+'/api/pair',{method:'POST',headers:{Origin:SITE_ORIGIN}});assert.equal(pair.status,200);const {token}=await pair.json();
-    const state=await fetch(base+'/api/state',{headers:{Origin:SITE_ORIGIN,Authorization:`Bearer ${token}`}});assert.equal(state.status,200);assert.equal(state.headers.get('access-control-allow-origin'),SITE_ORIGIN);
-    assert.equal((await fetch(base+'/api/state',{headers:{Origin:SITE_ORIGIN,Authorization:'Bearer '+ 'x'.repeat(64)}})).status,401);
+    const pair=await fetch(base+'/api/pair',{method:'POST',headers:{Origin:HOSTED_UI_ORIGIN}});assert.equal(pair.status,200);const {token}=await pair.json();
+    const state=await fetch(base+'/api/state',{headers:{Origin:HOSTED_UI_ORIGIN,Authorization:`Bearer ${token}`}});assert.equal(state.status,200);assert.equal(state.headers.get('access-control-allow-origin'),HOSTED_UI_ORIGIN);
+    assert.equal((await fetch(base+'/api/state',{headers:{Origin:HOSTED_UI_ORIGIN,Authorization:'Bearer '+ 'x'.repeat(64)}})).status,401);
   }finally{server.closeAllConnections();await new Promise(r=>server.close(r));await created.close?.();}
 });

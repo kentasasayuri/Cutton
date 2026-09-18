@@ -1,12 +1,12 @@
 # Cutton
 
-Sites版とローカル編集エンジンを組み合わせた構成です。最新の対応範囲・未実装機能は [機能一覧](docs/FEATURES.md)、実証済みのVids操作は [Vids連携](docs/GOOGLE-VIDS.md) を参照してください。
+GitHub Pagesの公開UIと、PC上で動くローカル編集エンジンを組み合わせた構成です。最新の対応範囲・未実装機能は [機能一覧](docs/FEATURES.md)、実証済みのVids操作は [Vids連携](docs/GOOGLE-VIDS.md) を参照してください。
 
 個人用のローカル動画編集アプリ。編集点を先に計画し、ストーリーボード・素材・映像／音声トラックを一つのプロジェクトで管理します。UI、CLI、MCP、WebMCPは同じコマンド処理を使用します。
 
 ## 起動
 
-Sites版: https://cutton.d5hvb7z8cv.chatgpt.site 。「Cuttonを起動」、またはデスクトップの「Cutton」から開きます。エンジンの準備後、新規／既存プロジェクトの選択画面が開きます。初回のみ外部アプリを開く確認が出る場合があります。起動済みなら「起動済みのCuttonを開く」で移動します。Sites内で直接編集したい場合は「別の開き方」から接続できます。
+公開UI: https://kentasasayuri.github.io/Cutton/ 。閲覧とローカル編集にOpenAIアカウントは不要です。「Cuttonを起動」、またはデスクトップの「Cutton」から開きます。エンジンの準備後、新規／既存プロジェクトの選択画面が開きます。初回のみ外部アプリを開く確認が出る場合があります。起動済みなら「起動済みのCuttonを開く」で移動します。公開UI内で直接編集する場合は「別の開き方」から接続できます。
 
 このフォルダの `Cuttonを起動.cmd` をダブルクリックします。サーバーは `http://127.0.0.1:4318` で動作します。Codex内では同じURLをブラウザパネルで開けます。
 
@@ -102,7 +102,7 @@ MCP設定例（アプリのサーバーを先に起動）:
   "mcpServers": {
     "cutton": {
       "command": "node",
-      "args": ["C:/Users/hirak/Desktop/英語科 - コピー/Cutton/bin/mcp.mjs"]
+      "args": ["C:/path/to/Cutton/bin/mcp.mjs"]
     }
   }
 }
@@ -111,7 +111,7 @@ MCP設定例（アプリのサーバーを先に起動）:
 Codex CLIへの登録:
 
 ```powershell
-codex mcp add cutton -- node 'C:\Users\hirak\Desktop\英語科 - コピー\Cutton\bin\mcp.mjs'
+codex mcp add cutton -- node 'C:\path\to\Cutton\bin\mcp.mjs'
 ```
 
 `cutton_capabilities` で操作一覧を取得し、`cutton_command` へ `{command,args}` を渡します。画面のボタンは `data-action`、対象は `data-entity-id`、入力はアクセシビリティ名で識別できます。`GET /api/capabilities` と `GET /api/state` が機械向けの操作情報です。

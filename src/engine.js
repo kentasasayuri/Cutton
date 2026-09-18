@@ -1,4 +1,5 @@
-const remote = typeof location !== 'undefined' && location.hostname.endsWith('.chatgpt.site');
+const loopback = hostname => ['localhost','127.0.0.1','::1','[::1]'].includes(hostname);
+const remote = typeof location !== 'undefined' && location.protocol === 'https:' && !loopback(location.hostname);
 export const isHosted = remote;
 const base = remote ? 'http://127.0.0.1:4318' : '';
 let token='', pairing;

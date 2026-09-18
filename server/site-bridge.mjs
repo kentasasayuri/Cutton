@@ -1,13 +1,13 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 
-// The UI is hosted by Sites; only the owner-selected origin may pair with this engine.
-export const SITE_ORIGIN = 'https://cutton.d5hvb7z8cv.chatgpt.site';
+// Only the configured public UI origin may pair with this local engine.
+export const HOSTED_UI_ORIGIN = process.env.CUTTON_UI_ORIGIN || 'https://kentasasayuri.github.io';
 // A document navigation serves only the public editor shell, never project data.
 export const isEditorNavigation = req => req.method === 'GET'
   && ['/', '/index.html'].includes(req.path)
   && req.get('sec-fetch-mode') === 'navigate'
   && req.get('sec-fetch-dest') === 'document';
-export function createSiteBridge(fallback, { origin = SITE_ORIGIN } = {}) {
+export function createSiteBridge(fallback, { origin = HOSTED_UI_ORIGIN } = {}) {
   const sessions = new Map();
   const same = (a,b) => typeof a === 'string' && /^[a-f0-9]{64}$/.test(a) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
   return (req,res,next) => {
@@ -29,7 +29,7 @@ export function createSiteBridge(fallback, { origin = SITE_ORIGIN } = {}) {
       return res.set('Cache-Control','no-store').json({token:key,expiresIn:43200});
     }
     if(typeof token!=='string'||![...sessions.keys()].some(key=>same(token,key)))return res.status(401).json({error:'編集エンジンに再接続してください。'});
-    res.locals.sitesBridge=true;
+    res.locals.hostedUiBridge=true;
     next();
   };
 }
